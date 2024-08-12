@@ -1,0 +1,96 @@
+.logo {
+    max-width: 150px;
+    max-height: 150px;
+}
+
+.qr-code {
+    min-width: 300px;
+    min-height: 300px;
+    max-width: 300px;
+    max-height: 300px;
+}
+
+.credentials-offer-uri {
+    word-break: break-all;
+}
+
+.title {
+    margin-left: 10pt;
+}
+
+h2 {
+    color: #6e23d2;
+    font-size: 16pt;
+}
+
+h4 {
+    color: #000000;
+    font-size: 16pt
+}
+
+.container {
+    width: fit-content;
+}
+
+.bg-secondary-subtle {
+    --bs-secondary-bg-subtle: #f4f4f4;
+    border-radius: 18pt;
+}
+
+.form-label {
+    font-size: 12pt;
+}
+
+.highlight {
+    color: #6e23d2;
+}
+
+.btn, .btn-primary, .btn-warning {
+    border-radius: 18pt;
+    border-style: hidden;
+    height: 37pt;
+    width: 102pt;
+    align-content: center;
+    --bs-btn-bg: #6e23d2;
+    --bs-btn-active-bg: #6e23d2;
+    --bs-btn-disabled-bg: #6e23d2;
+    color: white;
+    --bs-btn-active-color: white;
+    --bs-btn-disabled-color: white;
+    --bs-btn-hover-color: white;
+    --bs-btn-hover-bg: #6e23d2;
+    --bs-btn-border-color: #6e23d2;
+    --bs-btn-active-border-color: #6e23d2;
+    --bs-btn-hover-border-color: #6e23d2;
+    --bs-btn-disabled-border-color: #6e23d2;
+}
+
+.btn-warning {
+    border-style: solid;
+    border-width: 2pt;
+    --bs-btn-bg: white;
+    --bs-btn-active-bg: white;
+    --bs-btn-disabled-bg: white;
+    color: black;
+    --bs-btn-active-color: black;
+    --bs-btn-disabled-color: black;
+    --bs-btn-hover-color: black;
+    --bs-btn-hover-bg: white;
+    --bs-btn-border-color: black;
+    --bs-btn-active-border-color: black;
+    --bs-btn-hover-border-color: black;
+    --bs-btn-disabled-border-color: black;
+}
+
+body {
+    font-family: Nunito, "Helvetica Neue", sans-serif;
+}
+
+.deeplink {
+    text-align: center;
+}
+
+.form-check-input:checked {
+    background-color: #6e23d2;
+    border-color: #6e23d2;
+}
