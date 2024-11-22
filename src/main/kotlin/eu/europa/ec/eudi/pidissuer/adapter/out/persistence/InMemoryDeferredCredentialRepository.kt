@@ -51,6 +51,7 @@ data class DeferredState(
 )
 
 private val log = LoggerFactory.getLogger(InMemoryDeferredCredentialRepository::class.java)
+
 class InMemoryDeferredCredentialRepository(
     private val data: MutableMap<TransactionId, DeferredState> = mutableMapOf(),
 ) {

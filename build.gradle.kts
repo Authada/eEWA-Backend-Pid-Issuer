@@ -30,11 +30,7 @@ repositories {
     maven {
         url = uri("https://build.shibboleth.net/nexus/content/repositories/releases/")
     }
-    maven {
-        url = uri("https://maven.walt.id/repository/waltid/")
-        mavenContent {
-        }
-    }
+    maven("https://maven.waltid.dev/releases")
 }
 
 dependencies {
@@ -53,6 +49,7 @@ dependencies {
     implementation(libs.arrow.core) {
         because("Functional programming support")
     }
+    implementation(libs.presentation.exchange)
     implementation(libs.arrow.fx.coroutines)
     implementation(libs.nimbus.jose.jwt)
     implementation(libs.eudi.sdjwt) {

@@ -21,9 +21,9 @@ import com.nimbusds.oauth2.sdk.AuthorizationRequest
 import eu.europa.ec.eudi.pidissuer.adapter.out.persistence.InMemoryWalletAttestationNonceRepository
 import eu.europa.ec.eudi.pidissuer.domain.WAVError
 import eu.europa.ec.eudi.pidissuer.domain.WalletAttestationNonce
+import eu.europa.ec.eudi.pidissuer.patch.WalletClientAttestation
 import eu.europa.ec.eudi.pidissuer.port.input.PARError
 import eu.europa.ec.eudi.pidissuer.port.input.PushedAuthorizationRequest
-import eu.europa.ec.eudi.pidissuer.port.input.WalletClientAttestation
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory

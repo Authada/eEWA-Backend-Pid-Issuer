@@ -82,7 +82,7 @@ class MetaDataApi(
             .json()
             .bodyValueAndAwait(
                 buildJsonObject {
-                    put("issuer ", JsonPrimitive(credentialIssuerMetaData.id.externalForm))
+                    put("issuer ", JsonPrimitive(credentialIssuerMetaData.id))
                     put("jwks ", Json.parseToJsonElement(credentialIssuerMetaData.jwtVcIssuerJwks.toString(true)))
                 },
             )

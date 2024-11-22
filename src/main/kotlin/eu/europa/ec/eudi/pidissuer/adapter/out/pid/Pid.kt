@@ -99,6 +99,7 @@ typealias Nationality = IsoCountry
  *This document stipulates that a
  */
 data class Pid(
+    val metaData: PidMetaData,
     val familyName: FamilyName? = null,
     val givenName: GivenName? = null,
     val birthDate: LocalDate? = null,
@@ -186,7 +187,7 @@ data class PidMetaData(
     val sourceType: String? = null,
 ) {
     init {
-        if(issuanceDate != null && expiryDate != null){
+        if (issuanceDate != null && expiryDate != null) {
             require(issuanceDate.isBefore(expiryDate)) { "Issuance date should be before expiry date" }
         }
         if (issuingAuthority != null && issuingAuthority is IssuingAuthority.MemberState && issuingCountry != null) {

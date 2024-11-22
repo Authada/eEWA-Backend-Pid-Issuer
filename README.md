@@ -1,11 +1,22 @@
-# Eudi PID Issuer
+# Eudi (PID) Issuer
 
 Based on EU reference implementation commit 2e8784b5a3acae2b38faee57f67696aa4fbb2eeb
 
 See https://github.com/eu-digital-identity-wallet/eudi-srv-pid-issuer/commit/2e8784b5a3acae2b38faee57f67696aa4fbb2eeb
 
+# Changes made in phase 2
+- Added signed_metadata containing a signed jwt signed by a trusted anchor which is checked by the authada wallet app prototype
+- Added mdl credential in mdoc format with basic login UI
+- Added pre-authorized flow for new credentials
+- Added pre-authorized flow msisdn credential in sd-jwt format with pid presentation during issuing
+- Added pre-authroized email credential in sd-jwt and mdoc format with basic email input ui
+- Updated doctype and attributes for pid sd-jwt format
+- Added validation of wallet provider attestation with chain validation (trust management for wallet attestation)
+- Refactoring issuing logic to support fast addition of new credentials
+- Added verifier client for starting presentations during issuing
+- Add new UI overview/home pages
 
-Changes made:
+# Changes made in phase 1:
 - Removed dependency on Keycloak/authorization server
 - Added OAuth 2.0 endpoints:
   - authorization server metadata endpoint

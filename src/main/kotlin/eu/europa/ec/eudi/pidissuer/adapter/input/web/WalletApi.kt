@@ -40,10 +40,17 @@ import arrow.core.toNonEmptySetOrNull
 import com.nimbusds.oauth2.sdk.token.AccessToken
 import com.nimbusds.oauth2.sdk.token.BearerAccessToken
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.security.DPoPTokenAuthentication
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.GetPidData
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.GetLocalPidData
 import eu.europa.ec.eudi.pidissuer.domain.Scope
-import eu.europa.ec.eudi.pidissuer.port.input.*
-import kotlinx.coroutines.async
+import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationContext
+import eu.europa.ec.eudi.pidissuer.port.input.CredentialRequestTO
+import eu.europa.ec.eudi.pidissuer.port.input.DeferredCredentialRequestTO
+import eu.europa.ec.eudi.pidissuer.port.input.DeferredCredentialSuccessResponse
+import eu.europa.ec.eudi.pidissuer.port.input.GetDeferredCredential
+import eu.europa.ec.eudi.pidissuer.port.input.HandleNotificationRequest
+import eu.europa.ec.eudi.pidissuer.port.input.IssueCredential
+import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialResponse
+import eu.europa.ec.eudi.pidissuer.port.input.NotificationResponse
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonElement
 import org.springframework.http.HttpStatus
@@ -51,14 +58,21 @@ import org.springframework.http.MediaType
 import org.springframework.security.core.GrantedAuthority
 import org.springframework.security.oauth2.core.OAuth2TokenIntrospectionClaimNames
 import org.springframework.security.oauth2.server.resource.authentication.BearerTokenAuthentication
-import org.springframework.web.reactive.function.server.*
+import org.springframework.web.reactive.function.server.ServerRequest
+import org.springframework.web.reactive.function.server.ServerResponse
+import org.springframework.web.reactive.function.server.awaitBody
+import org.springframework.web.reactive.function.server.awaitPrincipal
+import org.springframework.web.reactive.function.server.bodyValueAndAwait
+import org.springframework.web.reactive.function.server.buildAndAwait
+import org.springframework.web.reactive.function.server.coRouter
+import org.springframework.web.reactive.function.server.json
 
 private val APPLICATION_JWT = MediaType.parseMediaType("application/jwt")
 
 class WalletApi(
     private val issueCredential: IssueCredential,
     private val getDeferredCredential: GetDeferredCredential,
-    private val getPidData: GetPidData,
+    private val getPidData: GetLocalPidData,
     private val handleNotificationRequest: HandleNotificationRequest,
 ) {
 

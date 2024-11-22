@@ -399,8 +399,8 @@ data class DrivingPrivilege(
 
             data class VehicleAuthorizedPassengerSeats(override val value: Sign<Natural>) :
                 ParameterizedRestriction<Natural> {
-                    override val code: String = "S02"
-                }
+                override val code: String = "S02"
+            }
 
             data class VehicleCylinderCapacity(override val value: Sign<Cm3>) : ParameterizedRestriction<Cm3> {
                 override val code: String = "S03"

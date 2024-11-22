@@ -20,7 +20,6 @@ import com.nimbusds.jose.JOSEObjectType
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.crypto.ECDSASigner
 import com.nimbusds.jose.jwk.ECKey
-import com.nimbusds.jose.jwk.JWK
 import com.nimbusds.jwt.SignedJWT
 import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
 import eu.europa.ec.eudi.pidissuer.adapter.out.signingAlgorithm
@@ -32,7 +31,7 @@ import eu.europa.ec.eudi.sdjwt.SdJwtFactory
 import eu.europa.ec.eudi.sdjwt.SdJwtIssuer
 import eu.europa.ec.eudi.sdjwt.nimbus
 
-object SignedIssuer: SdJwtIssuerProvider {
+object SignedIssuer : SdJwtIssuerProvider {
     /**
      * Creates a Nimbus-based SD-JWT issuer
      * according to the requirements of SD-JWT VC

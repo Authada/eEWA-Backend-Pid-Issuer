@@ -46,7 +46,12 @@ class AuthenticatedChannelCOSECryptoProvider(
     private val verifierKey = verifierKA.key.toECKey().toECPublicKey()
 
     @OptIn(ExperimentalSerializationApi::class)
-    override fun sign1(payload: ByteArray, keyID: String?): COSESign1 {
+    override fun sign1(
+        payload: ByteArray,
+        headersProtected: id.walt.mdoc.dataelement.MapElement?,
+        headersUnprotected: id.walt.mdoc.dataelement.MapElement?,
+        keyID: String?
+    ): COSESign1 {
         val keyInfo = keyID?.let { keyMap[it] } ?: throw Exception("No key ID given, or key with given ID not found")
         val sign1Msg = AuthenticatedChannelMessage()
         sign1Msg.addAttribute(HeaderKeys.Algorithm, keyInfo.algorithmID.asCBOR(), Attribute.PROTECTED)

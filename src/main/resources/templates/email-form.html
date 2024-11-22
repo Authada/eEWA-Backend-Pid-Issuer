@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/x-icon"
+          href="../public/img/favicon.ico"
+          th:href="@{/public/img/favicon.ico}">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" type="text/css"
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+          th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
+    <link rel="stylesheet" type="text/css"
+          href="../public/css/main.css"
+          th:href="@{/public/css/main.css}">
+    <title th:text="#{eudiw} + ' :: ' + #{email-verification-title}">eEWA :: Email verification</title>
+</head>
+<body>
+<main>
+    <div class="container p-4">
+        <div class="row gy-2 mb-4">
+            <div class="col d-flex justify-content-start align-items-center">
+                <img class="logo"
+                     src="../public/img/logo.png"
+                     th:src="@{/public/img/logo.png}"
+                     alt="EU Digital Identity Wallet"
+                     th:alt="#{eudiw}"/>
+                <h1 class="title">eEWA - Email verifier</h1>
+            </div>
+        </div>
+        <div class="col d-flex justify-content-center align-items-center">
+            <h2 th:text="#{email-verification-title}">Email verification</h2>
+        </div>
+        <div class="row mb-2">
+            <div class="col">
+                <h4 th:text="#{please-enter-email}">Please enter your email:</h4>
+            </div>
+        </div>
+        <div class="row mb-2 p-2 bg-secondary-subtle">
+            <div class="col">
+                <form id="email-verification"
+                      method="post"
+                      enctype="application/x-www-form-urlencoded"
+                      th:action="@{${emailUri}}">
+                    <fieldset>
+                        <input type="hidden" name="request_uri" th:value="${requestUri}">
+                        <input type="hidden" name="client_id" th:value="${clientId}">
+                        <input type="hidden" name="tan" value="123456">
+                        <input th:if="${email}" type="hidden" name="email" th:value="${email}">
+                        <label class="form-check-label"
+                               for="email">
+                            <span th:content="@{label-email}">Email</span>
+                            <input id="email" type="email" name="email" th:disabled="${email}" th:value="${email}" autofocus required>
+                        </label>
+<!--                        <label th:if="${email}" class="form-check-label"-->
+<!--                               for="tan">-->
+<!--                            <span th:content="@{label-tan}">TAN</span>-->
+<!--                            <input id="tan" type="tan" name="tan" autofocus>-->
+<!--                        </label>-->
+
+                    </fieldset>
+                </form>
+            </div>
+        </div>
+        <div class="row mb-2">
+            <div class="col">
+                <p th:text="#{email-tan-notification}">We will send you a transaction number to the e-mail address you entered. You will need this number later in the process to complete the verification.</p>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col d-flex justify-content-center align-content-center">
+                <button type="submit" class="btn btn-primary" form="email-verification" th:text="#{email-verify-button}">Verify</button>
+            </div>
+        </div>
+    </div>
+</main>
+<script type="application/javascript"
+        src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.min.js"
+        th:src="@{/webjars/bootstrap/js/bootstrap.min.js}">
+</script>
+</body>
+</html>

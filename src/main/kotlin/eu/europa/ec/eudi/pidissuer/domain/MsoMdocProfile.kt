@@ -31,10 +31,13 @@
 package eu.europa.ec.eudi.pidissuer.domain
 
 import arrow.core.NonEmptySet
+import arrow.core.nonEmptySetOf
 import arrow.core.raise.Raise
 import arrow.core.raise.ensure
 import arrow.core.raise.ensureNotNull
 import com.nimbusds.jose.JWSAlgorithm
+import eu.europa.ec.eudi.pidissuer.adapter.out.Encode
+import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
 
 //
 // Credential MetaData
@@ -50,16 +53,28 @@ typealias MsoClaims = Map<MsoNameSpace, List<AttributeDetails>>
 /**
  * @param docType string identifying the credential type as defined in ISO.18013-5.
  */
-data class MsoMdocCredentialConfiguration(
+data class MsoMdocCredentialConfiguration<T>(
     override val id: CredentialConfigurationId,
-    val docType: MsoDocType,
-    override val cryptographicBindingMethodsSupported: Set<CryptographicBindingMethod>,
-    override val credentialSigningAlgorithmsSupported: Set<JWSAlgorithm>,
+    override val docType: MsoDocType,
     override val scope: Scope? = null,
     override val display: List<CredentialDisplay> = emptyList(),
     val msoClaims: MsoClaims = emptyMap(),
-    override val proofTypesSupported: NonEmptySet<ProofType>,
-) : CredentialConfiguration
+    override val encode: Encode<T>,
+    override val issuerId: CredentialIssuerId
+) : CredentialConfiguration<T> {
+    val order: List<String> = msoClaims.flatMap { entry ->
+        entry.value.map {
+            "${entry.key}~${it.name}"
+        }
+    }
+    override val format: Format
+        get() = MSO_MDOC_FORMAT
+    override val issuerSigningKey: IssuerSigningKey? = null
+    override val cryptographicBindingMethodsSupported: Set<CryptographicBindingMethod> = emptySet()
+    override val credentialSigningAlgorithmsSupported: Set<JWSAlgorithm> = emptySet()
+    override val proofTypesSupported: NonEmptySet<ProofType> =
+        nonEmptySetOf(ProofType.Jwt(nonEmptySetOf(JWSAlgorithm.ES256)))
+}
 
 //
 // Credential Request
@@ -75,7 +90,7 @@ data class MsoMdocCredentialRequest(
 }
 
 context(Raise<String>)
-internal fun MsoMdocCredentialRequest.validate(meta: MsoMdocCredentialConfiguration) {
+internal fun MsoMdocCredentialRequest.validate(meta: MsoMdocCredentialConfiguration<*>) {
     ensure(docType == meta.docType) { "doctype is $docType but was expecting ${meta.docType}" }
     if (meta.msoClaims.isEmpty()) {
         ensure(claims.isEmpty()) { "Requested claims should be empty. " }

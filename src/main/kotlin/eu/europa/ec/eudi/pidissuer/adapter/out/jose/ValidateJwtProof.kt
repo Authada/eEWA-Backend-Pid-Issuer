@@ -41,7 +41,11 @@ import com.nimbusds.jose.JWSHeader
 import com.nimbusds.jose.crypto.ECDSASigner
 import com.nimbusds.jose.crypto.Ed25519Signer
 import com.nimbusds.jose.crypto.RSASSASigner
-import com.nimbusds.jose.jwk.*
+import com.nimbusds.jose.jwk.AsymmetricJWK
+import com.nimbusds.jose.jwk.ECKey
+import com.nimbusds.jose.jwk.JWK
+import com.nimbusds.jose.jwk.OctetKeyPair
+import com.nimbusds.jose.jwk.RSAKey
 import com.nimbusds.jose.proc.DefaultJOSEObjectTypeVerifier
 import com.nimbusds.jose.proc.JWSKeySelector
 import com.nimbusds.jose.proc.SecurityContext
@@ -51,7 +55,12 @@ import com.nimbusds.jwt.SignedJWT
 import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier
 import com.nimbusds.jwt.proc.DefaultJWTProcessor
 import com.nimbusds.jwt.proc.JWTProcessor
-import eu.europa.ec.eudi.pidissuer.domain.*
+import eu.europa.ec.eudi.pidissuer.domain.CNonce
+import eu.europa.ec.eudi.pidissuer.domain.CredentialConfiguration
+import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerId
+import eu.europa.ec.eudi.pidissuer.domain.CredentialKey
+import eu.europa.ec.eudi.pidissuer.domain.ProofType
+import eu.europa.ec.eudi.pidissuer.domain.UnvalidatedProof
 import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError
 import java.security.interfaces.ECPublicKey
 import java.security.interfaces.EdECPublicKey
@@ -64,7 +73,7 @@ fun validateJwtProof(
     credentialIssuerId: CredentialIssuerId,
     unvalidatedProof: UnvalidatedProof.Jwt,
     expectedCNonce: CNonce,
-    credentialConfiguration: CredentialConfiguration,
+    credentialConfiguration: CredentialConfiguration<*>,
 ): CredentialKey {
     val proofTypes = credentialConfiguration.proofTypesSupported
         .filterIsInstance<ProofType.Jwt>()
@@ -180,7 +189,7 @@ private fun processor(
             jwsKeySelector = keySelector
             jwtClaimsSetVerifier =
                 DefaultJWTClaimsVerifier<SecurityContext?>(
-                    credentialIssuerId.externalForm, // aud
+                    credentialIssuerId, // aud
                     JWTClaimsSet.Builder()
                         .claim("nonce", expected.nonce)
                         .build(),

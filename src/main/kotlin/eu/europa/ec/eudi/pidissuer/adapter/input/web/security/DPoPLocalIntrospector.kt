@@ -48,7 +48,8 @@ class DPoPLocalIntrospector(
                 val principal = DefaultOAuth2AuthenticatedPrincipal(
                     principalAttributes,
                     this.scope.map { SimpleGrantedAuthority("SCOPE_$it") }
-                )
+                ) //TODO reicht active oder sollte hier ne exception fliegen?
+                //TODO realm?
 
                 log.info("Retrieved Principal attributes {}", principalAttributes)
                 log.info("Returning Principal {}", principal.authorities.map { it.authority })

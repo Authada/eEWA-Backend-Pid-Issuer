@@ -34,10 +34,12 @@ import arrow.core.nonEmptySetOf
 import arrow.core.raise.Raise
 import arrow.core.raise.catch
 import arrow.core.raise.ensureNotNull
+import eu.europa.ec.eudi.pidissuer.adapter.out.GetData
 import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.DrivingPrivilege.Restriction.GenericRestriction
 import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.DrivingPrivilege.Restriction.ParameterizedRestriction
 import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationContext
 import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError
+import eu.europa.ec.eudi.pidissuer.port.input.Username
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -47,7 +49,10 @@ import java.time.Month
 /**
  * Mock implementation for [GetMobileDrivingLicenceData].
  */
-class GetMobileDrivingLicenceDataMock : GetMobileDrivingLicenceData {
+class GetMobileDrivingLicenceDataMock : GetData<MobileDrivingLicence> {
+    override suspend fun invoke(username: Username): MobileDrivingLicence? {
+        throw UnsupportedOperationException()
+    }
 
     context(Raise<IssueCredentialError.Unexpected>)
     override suspend fun invoke(context: AuthorizationContext): MobileDrivingLicence {

@@ -35,8 +35,11 @@ import arrow.core.recover
 import arrow.core.some
 import arrow.core.toNonEmptySetOrNull
 import com.nimbusds.jose.EncryptionMethod
+import com.nimbusds.jose.JOSEObjectType
 import com.nimbusds.jose.JWEAlgorithm
 import com.nimbusds.jose.JWSAlgorithm
+import com.nimbusds.jose.JWSHeader
+import com.nimbusds.jose.crypto.ECDSASigner
 import com.nimbusds.jose.jwk.Curve
 import com.nimbusds.jose.jwk.ECKey
 import com.nimbusds.jose.jwk.JWK
@@ -45,7 +48,8 @@ import com.nimbusds.jose.jwk.OctetSequenceKey
 import com.nimbusds.jose.jwk.RSAKey
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator
 import com.nimbusds.jose.util.Base64
-import com.nimbusds.oauth2.sdk.GrantType
+import com.nimbusds.jwt.JWTClaimsSet
+import com.nimbusds.jwt.SignedJWT
 import com.nimbusds.oauth2.sdk.ResponseMode
 import com.nimbusds.oauth2.sdk.ResponseType
 import com.nimbusds.oauth2.sdk.`as`.AuthorizationServerMetadata
@@ -56,9 +60,13 @@ import com.nimbusds.oauth2.sdk.id.Issuer
 import com.nimbusds.oauth2.sdk.util.X509CertificateUtils
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.AuthorizationRequestApi
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.EidApi
+import eu.europa.ec.eudi.pidissuer.adapter.input.web.EmailUi
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.IssuerApi
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.IssuerUi
+import eu.europa.ec.eudi.pidissuer.adapter.input.web.LoginUi
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.MetaDataApi
+import eu.europa.ec.eudi.pidissuer.adapter.input.web.MsisdnUi
+import eu.europa.ec.eudi.pidissuer.adapter.input.web.PreAuthorizedUi
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.PushedAuthorizationRequestApi
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.TokenApi
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.WalletApi
@@ -68,65 +76,83 @@ import eu.europa.ec.eudi.pidissuer.adapter.input.web.security.DPoPTokenReactiveA
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.security.DPoPTokenServerAccessDeniedHandler
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.security.DPoPTokenServerAuthenticationEntryPoint
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.security.ServerDPoPAuthenticationTokenAuthenticationConverter
+import eu.europa.ec.eudi.pidissuer.adapter.out.IssueGeneric
 import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
-import eu.europa.ec.eudi.pidissuer.adapter.out.authenticatedChannelAlgorithm
 import eu.europa.ec.eudi.pidissuer.adapter.out.credential.CredentialRequestFactory
 import eu.europa.ec.eudi.pidissuer.adapter.out.credential.DefaultResolveCredentialRequestByCredentialIdentifier
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.CreatePreauthorizedEmailSession
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.EmailSdJwtVcScopeNew
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.GetLocalEmailData
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.StoreEmailData
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.emailDocTypeSdjwt
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.emailMsoMdocV1
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.emailSdJwtVcV1
 import eu.europa.ec.eudi.pidissuer.adapter.out.jose.DefaultExtractJwkFromCredentialKey
 import eu.europa.ec.eudi.pidissuer.adapter.out.jose.EncryptCredentialResponseNimbus
 import eu.europa.ec.eudi.pidissuer.adapter.out.jose.EncryptDeferredResponseNimbus
-import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.DefaultEncodeMobileDrivingLicenceInCbor
-import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.EncodeMobileDrivingLicenceInCbor
 import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.GetMobileDrivingLicenceDataMock
-import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.IssueMobileDrivingLicence
-import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.MobileDrivingLicenceV1
-import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.MobileDrivingLicenceV1Scope
+import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.mobileDrivingLicenceV1
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.AuthorizeMsisdn
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.CreatePreauthorizedMsisdnSession
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.GetLocalMsisdnData
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.MsisdnSdJwtVcScopeNew
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.msisdnDocTypeSdjwt
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.msisdnSdJwtVcV1
 import eu.europa.ec.eudi.pidissuer.adapter.out.persistence.InMemoryAuthorizationRepository
 import eu.europa.ec.eudi.pidissuer.adapter.out.persistence.InMemoryCNonceRepository
 import eu.europa.ec.eudi.pidissuer.adapter.out.persistence.InMemoryDeferredCredentialRepository
 import eu.europa.ec.eudi.pidissuer.adapter.out.persistence.InMemoryIssuedCredentialRepository
 import eu.europa.ec.eudi.pidissuer.adapter.out.persistence.InMemoryWalletAttestationNonceRepository
 import eu.europa.ec.eudi.pidissuer.adapter.out.pid.AuthenticatedChannelCertificateIssuer
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.DefaultEncodePidInCbor
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.EncodePidInCbor
 import eu.europa.ec.eudi.pidissuer.adapter.out.pid.GetLocalPidData
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.IssueMsoMdocPid
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.IssueSdJwtVcPid
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.IssueSeTlvVcPidWithCertificate
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidMsoMdocScope
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidMsoMdocV1
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PID_DOCTYPE_SDJWTVC
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PID_DOCTYPE_SDJWTVC_NEW
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidSdJwtVcScopeNew
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidSdJwtVcScopeNew2
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.pidMsoMdocV1
 import eu.europa.ec.eudi.pidissuer.adapter.out.pid.pidSdJwtVcV1
 import eu.europa.ec.eudi.pidissuer.adapter.out.pid.pidSeTlvVcV1WithCertificate
 import eu.europa.ec.eudi.pidissuer.adapter.out.qr.DefaultGenerateQrCode
-import eu.europa.ec.eudi.pidissuer.adapter.out.signingAlgorithm
 import eu.europa.ec.eudi.pidissuer.domain.CredentialIdentifier
+import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerId
 import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerMetaData
 import eu.europa.ec.eudi.pidissuer.domain.CredentialResponseEncryption
 import eu.europa.ec.eudi.pidissuer.domain.CredentialResponseEncryptionSupportedParameters
 import eu.europa.ec.eudi.pidissuer.domain.HttpsUrl
+import eu.europa.ec.eudi.pidissuer.domain.MsoMdocCredentialConfiguration
 import eu.europa.ec.eudi.pidissuer.domain.MsoMdocCredentialRequest
+import eu.europa.ec.eudi.pidissuer.domain.SdJwtVcCredentialConfiguration
 import eu.europa.ec.eudi.pidissuer.domain.SdJwtVcCredentialRequest
+import eu.europa.ec.eudi.pidissuer.domain.SeTlvVcCredentialConfiguration
 import eu.europa.ec.eudi.pidissuer.domain.SeTlvVcCredentialRequest
 import eu.europa.ec.eudi.pidissuer.domain.ValidateWalletAttestation
 import eu.europa.ec.eudi.pidissuer.eid.EIDConfiguration
 import eu.europa.ec.eudi.pidissuer.eid.createEidClient
+import eu.europa.ec.eudi.pidissuer.patch.GrantType
+import eu.europa.ec.eudi.pidissuer.patch.WalletClientAttestation
 import eu.europa.ec.eudi.pidissuer.port.input.AccessTokenRequest
 import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationRequest
+import eu.europa.ec.eudi.pidissuer.port.input.CreateAuthorizationCodeUri
 import eu.europa.ec.eudi.pidissuer.port.input.CreateCredentialsOffer
 import eu.europa.ec.eudi.pidissuer.port.input.CreateTCToken
+import eu.europa.ec.eudi.pidissuer.port.input.GenerateAuthorizationReturnUrl
+import eu.europa.ec.eudi.pidissuer.port.input.GetAttributeDetails
 import eu.europa.ec.eudi.pidissuer.port.input.GetAuthorizationMetaData
 import eu.europa.ec.eudi.pidissuer.port.input.GetCredentialIssuerMetaData
 import eu.europa.ec.eudi.pidissuer.port.input.GetDeferredCredential
+import eu.europa.ec.eudi.pidissuer.port.input.GetPreauthorizedCode
 import eu.europa.ec.eudi.pidissuer.port.input.HandleEidResult
 import eu.europa.ec.eudi.pidissuer.port.input.HandleNotificationRequest
 import eu.europa.ec.eudi.pidissuer.port.input.IssueCredential
 import eu.europa.ec.eudi.pidissuer.port.input.PushedAuthorizationRequest
-import eu.europa.ec.eudi.pidissuer.port.input.WalletClientAttestation
 import eu.europa.ec.eudi.pidissuer.port.out.asDeferred
 import eu.europa.ec.eudi.pidissuer.port.out.persistence.GenerateCNonce
 import eu.europa.ec.eudi.pidissuer.port.out.persistence.GenerateNotificationId
 import eu.europa.ec.eudi.pidissuer.port.out.persistence.GenerateTransactionId
-import eu.europa.ec.eudi.sdjwt.HashAlgorithm
+import eu.europa.ec.eudi.pidissuer.verifier.GetWalletResponse
+import eu.europa.ec.eudi.pidissuer.verifier.InitTransaction
+import eu.europa.ec.eudi.pidissuer.verifier.RequestPidPresentation
+import eu.europa.ec.eudi.pidissuer.verifier.RetrievePidPresentation
 import io.netty.handler.ssl.SslContextBuilder
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory
 import jakarta.ws.rs.client.Client
@@ -171,6 +197,7 @@ import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.util.UriComponentsBuilder
 import reactor.netty.http.client.HttpClient
 import java.io.File
+import java.net.URI
 import java.net.URL
 import java.security.KeyStore
 import java.security.cert.X509Certificate
@@ -245,7 +272,11 @@ internal object RestEasyClients {
 @OptIn(ExperimentalSerializationApi::class)
 fun beans(clock: Clock) = beans {
     val issuerPublicUrl = env.readRequiredUrl("issuer.publicUrl", removeTrailingSlash = true)
+    val issuerId: CredentialIssuerId = env.readRequiredUrl("issuer.id", removeTrailingSlash = true).externalForm
     val enableMobileDrivingLicence = env.getProperty("issuer.mdl.enabled", true)
+    val enableMsisdn = env.getProperty("issuer.msisdn.enabled", true)
+    val enableVerifiedEmail = env.getProperty("issuer.email.enabled", true)
+    val enableVerifiedEmailMdoc = env.getProperty("issuer.email_mdoc.enabled", true)
     val enableMsoMdocPid = env.getProperty<Boolean>("issuer.pid.mso_mdoc.enabled") ?: true
     val enableSdJwtVcPid = env.getProperty<Boolean>("issuer.pid.sd_jwt_vc.enabled") ?: true
     val enableSeTlvVcPidWithCertificate =
@@ -303,96 +334,53 @@ fun beans(clock: Clock) = beans {
     bean {
         GetLocalPidData(ref(), clock)
     }
-    bean<EncodePidInCbor>(isLazyInit = true) {
-        when (env.getProperty<MsoMdocEncoderOption>("issuer.pid.mso_mdoc.encoder")) {
-            null, MsoMdocEncoderOption.Internal -> {
-                log.info("Using internal encoder to encode PID in CBOR")
-                val issuerSigningKey = ref<IssuerSigningKey>()
-                val duration = env.getProperty("issuer.pid.mso_mdoc.encoder.duration")
-                    ?.let { Duration.parse(it).toKotlinDuration() }
-                    ?: 30.days
-                DefaultEncodePidInCbor(clock, issuerSigningKey, duration)
-            }
-        }
-    }
     bean {
         GetMobileDrivingLicenceDataMock()
-    }
-    bean<EncodeMobileDrivingLicenceInCbor>(isLazyInit = true) {
-        when (env.getProperty<MsoMdocEncoderOption>("issuer.mdl.mso_mdoc.encoder")) {
-            null, MsoMdocEncoderOption.Internal -> {
-                log.info("Using internal encoder to encode mDL in CBOR")
-                val issuerSigningKey = ref<IssuerSigningKey>()
-                val duration = env.getProperty("issuer.mdl.mso_mdoc.encoder.duration")
-                    ?.let { Duration.parse(it).toKotlinDuration() }
-                    ?: 5.days
-                DefaultEncodeMobileDrivingLicenceInCbor(clock, issuerSigningKey, duration)
-            }
-        }
     }
     bean(::DefaultGenerateQrCode)
     bean(::HandleNotificationRequest)
     bean {
+        val credentialIssuerMetadata = ref<CredentialIssuerMetaData>()
         val resolvers = buildMap<CredentialIdentifier, CredentialRequestFactory> {
-            if (enableMobileDrivingLicence) {
-                this[CredentialIdentifier(MobileDrivingLicenceV1Scope.value)] =
-                    { unvalidatedProof, requestedResponseEncryption, verifierKA ->
+            credentialIssuerMetadata.specificCredentialIssuers.forEach { credentialIssuer ->
+                val config = credentialIssuer.supportedCredential
+                this[CredentialIdentifier(config.scope!!.value)] = when (config) {
+                    is MsoMdocCredentialConfiguration -> { unvalidatedProof, requestedResponseEncryption, verifierKA ->
                         MsoMdocCredentialRequest(
                             unvalidatedProof = unvalidatedProof,
                             credentialResponseEncryption = requestedResponseEncryption,
-                            docType = MobileDrivingLicenceV1.docType,
-                            claims = MobileDrivingLicenceV1.msoClaims.mapValues { entry ->
+                            docType = config.docType,
+                            claims = config.msoClaims.mapValues { entry ->
                                 entry.value.map { attribute -> attribute.name }
                             },
                             verifierKA,
                         )
                     }
-            }
 
-            if (enableMsoMdocPid) {
-                this[CredentialIdentifier(PidMsoMdocScope.value)] =
-                    { unvalidatedProof, requestedResponseEncryption, verifierKA ->
-                        MsoMdocCredentialRequest(
-                            unvalidatedProof = unvalidatedProof,
-                            credentialResponseEncryption = requestedResponseEncryption,
-                            docType = PidMsoMdocV1.docType,
-                            claims = PidMsoMdocV1.msoClaims.mapValues { entry -> entry.value.map { attribute -> attribute.name } },
-                            verifierKA
-                        )
-                    }
-            }
-
-            if (enableSdJwtVcPid) {
-                val signingAlgorithm = ref<IssuerSigningKey>().signingAlgorithm
-                pidSdJwtVcV1(signingAlgorithm).let { sdJwtVcPid ->
-                    this[CredentialIdentifier(sdJwtVcPid.scope!!.value)] =
+                    is SdJwtVcCredentialConfiguration ->
                         { unvalidatedProof, requestedResponseEncryption, verifierKA ->
                             SdJwtVcCredentialRequest(
                                 unvalidatedProof = unvalidatedProof,
                                 credentialResponseEncryption = requestedResponseEncryption,
-                                type = sdJwtVcPid.type,
-                                claims = sdJwtVcPid.claims.map { it.name }.toSet(),
+                                type = config.docType,
+                                claims = config.claims.map { it.name }.toSet(),
+                                verifierKA,
+                            )
+                        }
+
+                    is SeTlvVcCredentialConfiguration ->
+                        { unvalidatedProof, requestedResponseEncryption, verifierKA ->
+                            SeTlvVcCredentialRequest(
+                                unvalidatedProof = unvalidatedProof,
+                                credentialResponseEncryption = requestedResponseEncryption,
+                                type = config.docType,
+                                claims = config.claims.map { it.name }.toSet(),
                                 verifierKA,
                             )
                         }
                 }
             }
 
-            if (enableSeTlvVcPidWithCertificate) {
-                val signingAlgorithm = ref<IssuerSigningKey>().authenticatedChannelAlgorithm
-                pidSeTlvVcV1WithCertificate(signingAlgorithm).let { seTlvVC ->
-                    this[CredentialIdentifier(seTlvVC.scope!!.value)] =
-                        { unvalidatedProof, requestedResponseEncryption, verifierKA ->
-                            SeTlvVcCredentialRequest(
-                                unvalidatedProof = unvalidatedProof,
-                                credentialResponseEncryption = requestedResponseEncryption,
-                                type = seTlvVC.type,
-                                claims = seTlvVC.claims.map { it.name }.toSet(),
-                                verifierKA,
-                            )
-                        }
-                }
-            }
         }
 
         DefaultResolveCredentialRequestByCredentialIdentifier(resolvers)
@@ -458,47 +446,74 @@ fun beans(clock: Clock) = beans {
         AuthenticatedChannelCertificateIssuer(clock, ref(), { iat -> iat.plus(expiration).toInstant() })
     }
 
+    val verifierUrl = URI.create(env.getRequiredProperty("verifier.url")).toURL()
+    bean {
+        InitTransaction(ref(), verifierUrl)
+    }
+
+    bean {
+        GetWalletResponse(ref(), verifierUrl)
+    }
+    bean {
+        RequestPidPresentation(ref())
+    }
+
+    bean {
+        RetrievePidPresentation(ref())
+    }
+
+    bean {
+        GetLocalEmailData(ref(), clock)
+    }
+
     //
     // Specific Issuers
     //
     bean {
+        val issuerSigningKey = ref<IssuerSigningKey>()
         CredentialIssuerMetaData(
-            id = issuerPublicUrl,
+            id = issuerId,
             credentialEndPoint = issuerPublicUrl.appendPath(WalletApi.CREDENTIAL_ENDPOINT),
             deferredCredentialEndpoint = issuerPublicUrl.appendPath(WalletApi.DEFERRED_ENDPOINT),
             notificationEndpoint = issuerPublicUrl.appendPath(WalletApi.NOTIFICATION_ENDPOINT),
             credentialResponseEncryption = env.credentialResponseEncryption(),
             specificCredentialIssuers = buildList {
                 if (enableMsoMdocPid) {
-                    val issueMsoMdocPid = IssueMsoMdocPid(
-                        credentialIssuerId = issuerPublicUrl,
-                        getPidData = ref(),
-                        encodePidInCbor = ref(),
-                        notificationsEnabled = env.getProperty<Boolean>("issuer.pid.mso_mdoc.notifications.enabled")
-                            ?: true,
-                        generateNotificationId = ref(),
-                        clock = clock,
-                        storeIssuedCredential = ref(),
+                    add(
+                        IssueGeneric(
+                            extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
+                            getData = ref<GetLocalPidData>(),
+                            notificationsEnabled = false,
+                            generateNotificationId = ref(),
+                            clock = clock,
+                            storeIssuedCredential = ref(),
+                            supportedCredential = pidMsoMdocV1(
+                                issuerSigningKey,
+                                clock,
+                                Duration.ofDays(365).toKotlinDuration(),
+                                issuerId
+                            )
+                        )
                     )
-                    add(issueMsoMdocPid)
                 }
 
-                val issuerSigningKey = ref<IssuerSigningKey>()
                 if (enableSeTlvVcPidWithCertificate) {
                     val deferred = env.getProperty<Boolean>("issuer.pid.se_tlv_vc.deferred") ?: false
 
-                    val issueSdJwtVcPidWithCertificate = IssueSeTlvVcPidWithCertificate(
-                        issuerSigningKey = issuerSigningKey,
-                        getPidData = ref(),
-                        clock = clock,
-                        credentialIssuerId = issuerPublicUrl,
-                        extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
-                        notificationsEnabled = env.getProperty<Boolean>("issuer.pid.se_tlv_vc.notifications.enabled")
-                            ?: true,
-                        generateNotificationId = ref(),
-                        storeIssuedCredential = ref(),
-                        issuer = ref()
-                    )
+                    val issueSdJwtVcPidWithCertificate =
+                        IssueGeneric(
+                            extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
+                            getData = ref<GetLocalPidData>(),
+                            notificationsEnabled = false,
+                            generateNotificationId = ref(),
+                            clock = clock,
+                            storeIssuedCredential = ref(),
+                            supportedCredential = pidSeTlvVcV1WithCertificate(
+                                issuerSigningKey,
+                                issuerId,
+                                ref()
+                            )
+                        )
 
                     add(
                         if (deferred) issueSdJwtVcPidWithCertificate.asDeferred(ref(), ref())
@@ -514,47 +529,115 @@ fun beans(clock: Clock) = beans {
                         }.getOrNull()
                     }
 
-
-                    val issueSdJwtVcPid = IssueSdJwtVcPid(
-                        hashAlgorithm = HashAlgorithm.SHA_256,
-                        issuerSigningKey = issuerSigningKey,
-                        getPidData = ref(),
-                        clock = clock,
-                        credentialIssuerId = issuerPublicUrl,
-                        extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
-                        calculateExpiresAt = { iat -> iat.plusDays(30).toInstant() },
-                        calculateNotUseBefore = notUseBefore?.let { duration ->
-                            { iat ->
-                                iat.plusSeconds(duration.seconds).toInstant()
-                            }
-                        },
-                        notificationsEnabled = env.getProperty<Boolean>("issuer.pid.sd_jwt_vc.notifications.enabled")
-                            ?: true,
-                        generateNotificationId = ref(),
-                        storeIssuedCredential = ref(),
-                    )
+                    val issueSdJwtVcPid3 =
+                        IssueGeneric(
+                            extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
+                            getData = ref<GetLocalPidData>(),
+                            notificationsEnabled = false,
+                            generateNotificationId = ref(),
+                            clock = clock,
+                            storeIssuedCredential = ref(),
+                            supportedCredential = pidSdJwtVcV1(
+                                issuerSigningKey,
+                                issuerId,
+                                clock,
+                                notUseBefore?.let { duration ->
+                                    { iat ->
+                                        iat.plusSeconds(duration.seconds).toInstant()
+                                    }
+                                },
+                                docType = PID_DOCTYPE_SDJWTVC_NEW,
+                                scope = PidSdJwtVcScopeNew2
+                            )
+                        )
 
                     add(
-                        if (deferred) issueSdJwtVcPid.asDeferred(ref(), ref())
-                        else issueSdJwtVcPid,
+                        if (deferred) issueSdJwtVcPid3.asDeferred(ref(), ref())
+                        else issueSdJwtVcPid3,
                     )
 
                 }
 
 
                 if (enableMobileDrivingLicence) {
-                    val mdlIssuer = IssueMobileDrivingLicence(
-                        credentialIssuerId = issuerPublicUrl,
-                        getMobileDrivingLicenceData = ref(),
-                        encodeMobileDrivingLicenceInCbor = ref(),
-                        notificationsEnabled = env.getProperty<Boolean>("issuer.mdl.notifications.enabled") ?: true,
-                        generateNotificationId = ref(),
-                        clock = clock,
-                        storeIssuedCredential = ref(),
+                    add(
+                        IssueGeneric(
+                            extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
+                            getData = ref<GetMobileDrivingLicenceDataMock>(),
+                            notificationsEnabled = false,
+                            generateNotificationId = ref(),
+                            clock = clock,
+                            storeIssuedCredential = ref(),
+                            supportedCredential = mobileDrivingLicenceV1(
+                                issuerSigningKey,
+                                clock,
+                                Duration.ofDays(365).toKotlinDuration(),
+                                issuerId
+                            )
+                        )
                     )
-                    add(mdlIssuer)
+                }
+                if (enableVerifiedEmail) {
+                    add(
+                        IssueGeneric(
+                            extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
+                            getData = ref<GetLocalEmailData>(),
+                            notificationsEnabled = false,
+                            generateNotificationId = ref(),
+                            clock = clock,
+                            storeIssuedCredential = ref(),
+                            supportedCredential = emailSdJwtVcV1(
+                                issuerSigningKey,
+                                issuerId,
+                                emailDocTypeSdjwt(1),
+                                EmailSdJwtVcScopeNew
+                            )
+                        )
+                    )
+                }
+                if (enableVerifiedEmailMdoc) {
+                    add(
+                        IssueGeneric(
+                            extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
+                            getData = ref<GetLocalEmailData>(),
+                            notificationsEnabled = false,
+                            generateNotificationId = ref(),
+                            clock = clock,
+                            storeIssuedCredential = ref(),
+                            supportedCredential = emailMsoMdocV1(
+                                issuerSigningKey,
+                                clock,
+                                Duration.ofDays(365).toKotlinDuration(),
+                                issuerId
+                            )
+                        )
+                    )
+                }
+                if (enableMsisdn) {
+                    add(
+                        IssueGeneric(
+                            extractJwkFromCredentialKey = DefaultExtractJwkFromCredentialKey,
+                            getData = ref<GetLocalMsisdnData>(),
+                            notificationsEnabled = false,
+                            generateNotificationId = ref(),
+                            clock = clock,
+                            storeIssuedCredential = ref(),
+                            supportedCredential = msisdnSdJwtVcV1(
+                                issuerId,
+                                issuerSigningKey,
+                                msisdnDocTypeSdjwt(1),
+                                MsisdnSdJwtVcScopeNew
+                            )
+                        )
+                    )
                 }
             },
+            signedMetadata = SignedJWT.parse(
+                env.getProperty<String>("issuer.attestation.jwt") ?: generateAttestation(
+                    issuerSigningKey,
+                    issuerId
+                )
+            )
         )
     }
 
@@ -576,7 +659,11 @@ fun beans(clock: Clock) = beans {
             setSupportsRequestParam(false)
             setSupportsRequestURIParam(false)
             tokenEndpointAuthMethods = listOf(ClientAuthenticationMethod(WalletClientAttestation.methodName))
-            grantTypes = listOf(GrantType.AUTHORIZATION_CODE)
+            grantTypes =
+                listOf(
+                    com.nimbusds.oauth2.sdk.GrantType.AUTHORIZATION_CODE,
+                    com.nimbusds.oauth2.sdk.GrantType(GrantType.PRE_AUTHORIZED_CODE.value)
+                )
             responseModes = listOf(ResponseMode.QUERY)
             responseTypes = listOf(ResponseType.CODE)
             this.setRequiresRequestURIRegistration(false)
@@ -613,7 +700,16 @@ fun beans(clock: Clock) = beans {
     }
 
     bean {
-        ValidateWalletAttestation(ref(), clock)
+        ValidateWalletAttestation(
+            ref(),
+            clock,
+            KeyStore.getInstance(env.getRequiredProperty("issuer.trustlist.type")).apply {
+                load(
+                    DefaultResourceLoader().getResource(env.getRequiredProperty("issuer.trustlist")).inputStream,
+                    env.getRequiredProperty("issuer.trustlist.password").toCharArray()
+                )
+            }
+        )
     }
 
     //
@@ -623,16 +719,25 @@ fun beans(clock: Clock) = beans {
         CreateTCToken(ref(), ref(), ref())
     }
     bean {
-        PushedAuthorizationRequest(ref(), ref(), issuerPublicUrl, ref(), ref())
+        PushedAuthorizationRequest(ref(), ref(), issuerId, ref(), ref())
     }
     bean {
-        AuthorizationRequest(ref(), ref())
+        AuthorizationRequest(ref(), ref(), issuerPublicUrl)
     }
     bean {
-        AccessTokenRequest(ref(), ref(), ref(), ref(), ref(), issuerPublicUrl, ref(), ref(), ref())
+        AccessTokenRequest(ref(), ref(), ref(), ref(), ref(), issuerId, ref(), ref(), ref())
     }
     bean {
-        HandleEidResult(ref(), ref(), ref())
+        CreateAuthorizationCodeUri()
+    }
+    bean {
+        GetPreauthorizedCode(ref(), ref(), ref())
+    }
+    bean {
+        GenerateAuthorizationReturnUrl(ref(), ref(), ref(), issuerPublicUrl)
+    }
+    bean {
+        HandleEidResult(ref(), ref(), ref(), ref())
     }
     bean(::GetCredentialIssuerMetaData)
     bean(::GetAuthorizationMetaData)
@@ -646,20 +751,58 @@ fun beans(clock: Clock) = beans {
         CreateCredentialsOffer(ref(), credentialsOfferUri)
     }
 
+    bean {
+        StoreEmailData(ref())
+    }
+
+    bean {
+        GetAttributeDetails(ref())
+    }
+
+    bean {
+        CreatePreauthorizedEmailSession(ref(), ref(), ref())
+    }
+
+    bean {
+        CreatePreauthorizedMsisdnSession(ref(), ref(), ref())
+    }
+
+    bean {
+        AuthorizeMsisdn(ref(), ref(), ref(), issuerPublicUrl)
+    }
+
+    bean {
+        GetLocalMsisdnData(ref())
+    }
+
     //
     // Routes
     //
     bean {
         val metaDataApi = MetaDataApi(ref(), ref(), ref())
         val walletApi = WalletApi(ref(), ref(), ref(), ref())
-        val issuerUi = IssuerUi(credentialsOfferUri, ref(), ref(), ref())
+        val issuerUi = IssuerUi(credentialsOfferUri, ref(), ref(), ref(), issuerPublicUrl, ref())
+        val loginUi = LoginUi(ref())
+        val emailUi = EmailUi(ref(), ref(), ref())
+        val msisdnUi = MsisdnUi(ref(), ref(), ref(), ref())
         val issuerApi = IssuerApi(ref())
         val eidApi = EidApi(ref(), ref(), issuerPublicUrl)
-        val authorizationRequestApi = AuthorizationRequestApi(ref(), issuerPublicUrl)
+        val authorizationRequestApi = AuthorizationRequestApi(ref())
         val tokenApi = TokenApi(ref())
         val pushedAuthorizationRequestApi = PushedAuthorizationRequestApi(ref(), ref(), ref())
-        metaDataApi.route.and(walletApi.route).and(issuerUi.router).and(issuerApi.router).and(eidApi.router)
-            .and(authorizationRequestApi.router).and(pushedAuthorizationRequestApi.router).and(tokenApi.router)
+        val preAuthorizedUi = PreAuthorizedUi(issuerPublicUrl)
+        metaDataApi.route
+            .and(walletApi.route)
+            .and(issuerUi.router)
+            .and(issuerApi.router)
+            .and(eidApi.router)
+            .and(authorizationRequestApi.router)
+            .and(pushedAuthorizationRequestApi.router)
+            .and(tokenApi.router)
+            .and(loginUi.router)
+            .and(emailUi.router)
+            .and(msisdnUi.router)
+            .and(preAuthorizedUi.router)
     }
 
     //
@@ -707,10 +850,14 @@ fun beans(clock: Clock) = beans {
                 authorize(MetaDataApi.WELL_KNOWN_JWKS, permitAll)
                 authorize(MetaDataApi.WELL_KNOWN_JWT_VC_ISSUER, permitAll)
                 authorize(MetaDataApi.PUBLIC_KEYS, permitAll)
+                authorize(IssuerUi.HOME, permitAll)
                 authorize(IssuerUi.GENERATE_CREDENTIALS_OFFER, permitAll)
+                authorize(IssuerUi.GENERATE_CREDENTIALS_OFFER_PREAUTHORIZED, permitAll)
+                authorize(LoginUi.LOGIN, permitAll)
+                authorize(EmailUi.EMAIL_VERIFICATION, permitAll)
+                authorize(MsisdnUi.MSISDN, permitAll)
+                authorize(PreAuthorizedUi.PREAUTHORIZED_OVERVIEW, permitAll)
                 authorize(IssuerApi.CREATE_CREDENTIALS_OFFER, permitAll)
-                authorize("", permitAll)
-                authorize("/", permitAll)
                 authorize(env.getRequiredProperty("spring.webflux.static-path-pattern"), permitAll)
                 authorize(env.getRequiredProperty("spring.webflux.webjars-path-pattern"), permitAll)
                 authorize(anyExchange, denyAll)
@@ -972,6 +1119,79 @@ private fun loadJwkFromKeystore(environment: Environment, prefix: String): JWK {
         }
     }
 }
+
+
+private fun generateAttestation(signingKey: IssuerSigningKey, issuerId: String): String {
+    log.info("Generating new attestation for $issuerId")
+    val signingKeys = signingKey.key
+
+    val keyStoreTrustList = KeyStore.getInstance("PKCS12").apply {
+        load(
+            PidIssuerApplication::class.java.classLoader.getResourceAsStream("trustlist-keys.p12"),
+            "password".toCharArray()
+        )
+    }
+    val issuerTrustListKeys = JWK.load(keyStoreTrustList, "issuer trustlist ca", "password".toCharArray())
+    val issuerTrustListSigner =
+        ECDSASigner(issuerTrustListKeys.toECKey().toECPrivateKey(), Curve.P_256)
+    return sign(
+        signingKeys,
+        issuerTrustListKeys.toPublicJWK(),
+        issuerTrustListSigner,
+        issuerId,
+        "issuer-attestation+jwt"
+    ) {
+        this.claim(
+            "types",
+            arrayOf(
+                "urn:eu.europa.ec.eudi:pid:1",
+                "https://example.bmi.bund.de/credential/pid/1.0",
+                "eu.europa.ec.eudiw.pid.1",
+                "org.iso.18013.5.1.mDL",
+                "urn:eu.europa.ec.eudi:msisdn:1",
+                "urn:eu.europa.ec.eudi:email:1"
+            )
+        )
+    }
+}
+
+
+private fun sign(
+    bindingKey: JWK,
+    signingKey: JWK,
+    signer: ECDSASigner,
+    id: String,
+    type: String,
+    additionalClaims: JWTClaimsSet.Builder.() -> Unit = {}
+): String {
+    val now = Clock.systemUTC().instant()
+    val jwt = SignedJWT(
+        JWSHeader.Builder(signer.supportedECDSAAlgorithm())
+            .type(JOSEObjectType(type))
+            .jwk(signingKey)
+            .build(),
+        JWTClaimsSet.Builder()
+            .issuer("AUTHADA")
+            .subject(id)
+            .issueTime(
+                Date.from(now)
+            )
+            .expirationTime(Date.from(now + Duration.ofDays(365 * 3)))
+            .claim(
+                "cnf", mapOf(
+                    "jwk" to bindingKey.toPublicJWK().toJSONObject()
+                )
+            )
+            .apply {
+                additionalClaims(this)
+            }
+            .build()
+    ).apply {
+        sign(signer)
+    }
+    return jwt.serialize()
+}
+
 
 /**
  * Indicates whether a random key pairs should be generated, or a key pair should be loaded from a keystore.

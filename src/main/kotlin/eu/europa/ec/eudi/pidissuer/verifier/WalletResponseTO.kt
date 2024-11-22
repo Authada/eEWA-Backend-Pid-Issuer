@@ -28,11 +28,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package eu.europa.ec.eudi.pidissuer.adapter.out.pid
+package eu.europa.ec.eudi.pidissuer.verifier
 
-import com.nimbusds.jose.jwk.ECKey
-import eu.europa.ec.eudi.pidissuer.domain.VerifierKA
+import eu.europa.ec.eudi.prex.PresentationSubmission
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
-fun interface EncodePidInCbor {
-    suspend operator fun invoke(pid: Pid, pidMetaData: PidMetaData, holderKey: ECKey, verifierKA: VerifierKA?): String
-}
+
+@Serializable
+data class CredentialEntry(
+    val format: String,
+    val credential: String
+)
+
+/**
+ * Represent the [WalletResponse] as returned by the wallet
+ */
+@Serializable
+@SerialName("wallet_response")
+data class WalletResponseTO(
+    @SerialName("id_token") val idToken: String? = null,
+    @SerialName("credentials") val credentials: List<CredentialEntry>? = null,
+    @SerialName("presentation_submission") val presentationSubmission: PresentationSubmission? = null,
+    @SerialName("error") val error: String? = null,
+    @SerialName("error_description") val errorDescription: String? = null,
+)

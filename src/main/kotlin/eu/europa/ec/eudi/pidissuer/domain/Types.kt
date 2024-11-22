@@ -73,7 +73,7 @@ value class Scope(val value: String) {
 @JvmInline
 value class Format(val value: String)
 
-typealias CredentialIssuerId = HttpsUrl
+typealias CredentialIssuerId = String
 
 data class ImageUri(val uri: URI, val alternativeText: String? = null)
 data class DisplayName(val name: String, val locale: Locale)

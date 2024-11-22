@@ -17,15 +17,23 @@ package eu.europa.ec.eudi.pidissuer.domain
 
 import com.nimbusds.oauth2.sdk.AuthorizationRequest
 import de.bund.bsi.eid.PersonalDataType
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.Email
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.MsisdnData
+import eu.europa.ec.eudi.pidissuer.port.input.AuthenticationType
+import eu.europa.ec.eudi.pidissuer.verifier.PresentationSession
 import java.util.UUID
 
 data class AuthorizationSession(
     val authRequest: AuthorizationRequest,
     val matchedAttributeDetails: Map<Scope, List<AttributeDetails>>,
+    val authenticationType: AuthenticationType
 ) {
     var eidData: PersonalDataType? = null
     var ageVerificationResult: Boolean? = null
     var eidSessionId: ByteArray? = null
     var eidRequestCounter: Int = 1
     val id = UUID.randomUUID()
+    var email: Email? = null
+    var msisdn: MsisdnData? = null
+    var presentationSession: PresentationSession? = null
 }

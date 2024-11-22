@@ -33,6 +33,7 @@ package eu.europa.ec.eudi.pidissuer.domain
 import arrow.core.NonEmptySet
 import com.nimbusds.jose.EncryptionMethod
 import com.nimbusds.jose.JWEAlgorithm
+import com.nimbusds.jwt.SignedJWT
 import eu.europa.ec.eudi.pidissuer.port.out.IssueSpecificCredential
 import kotlinx.serialization.json.JsonElement
 
@@ -130,7 +131,8 @@ data class CredentialIssuerMetaData(
     val credentialResponseEncryption: CredentialResponseEncryption,
     val display: List<CredentialIssuerDisplay> = emptyList(),
     val specificCredentialIssuers: List<IssueSpecificCredential<JsonElement>>,
+    val signedMetadata: SignedJWT
 ) {
-    val credentialConfigurationsSupported: List<CredentialConfiguration>
+    val credentialConfigurationsSupported: List<CredentialConfiguration<*>>
         get() = specificCredentialIssuers.map { it.supportedCredential }
 }

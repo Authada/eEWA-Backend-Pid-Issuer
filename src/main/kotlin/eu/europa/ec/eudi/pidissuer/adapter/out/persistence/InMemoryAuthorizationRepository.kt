@@ -34,7 +34,7 @@ class InMemoryAuthorizationRepository {
 
 
     val GetAuthorizationSession = GetAuthorizationSession {
-        idAuthorizationSessionMap[it]!!
+        idAuthorizationSessionMap[it]!! //TODO handle null
     }
 
     val StoreAuthorizationSession = StoreAuthorizationSession {
@@ -49,12 +49,13 @@ class InMemoryAuthorizationRepository {
         idAuthorizationSessionMap[requestUriReference.remove(Pair(requestUri, clientId))!!]!!
     }
 
-    val GetAuthorizationSessionByRequestUriRepeatable = GetAuthorizationSessionByRequestUriRepeatable { requestUri, clientId ->
-        idAuthorizationSessionMap[requestUriReference[Pair(requestUri, clientId)]!!]!!
-    }
+    val GetAuthorizationSessionByRequestUriRepeatable =
+        GetAuthorizationSessionByRequestUriRepeatable { requestUri, clientId ->
+            idAuthorizationSessionMap[requestUriReference[Pair(requestUri, clientId)]!!]!!
+        }
 
     val GetAccessTokenMetadataByToken = GetAccessTokenMetadataByToken {
-        authorizationPrincipalReference[it]!!
+        authorizationPrincipalReference[it]!! //TODO should remove after expiration
     }
 
     val StoreAccessTokenMetadataByToken = StoreAccessTokenMetaByToken { token, metadata ->

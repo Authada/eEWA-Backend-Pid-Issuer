@@ -30,73 +30,52 @@
  */
 package eu.europa.ec.eudi.pidissuer.adapter.out.pid
 
-import arrow.core.nonEmptySetOf
-import arrow.core.raise.Raise
-import arrow.core.toNonEmptySetOrNull
-import com.nimbusds.jose.JWSAlgorithm
-import com.nimbusds.jose.jwk.JWK
 import de.bund.bsi.eid.OperationsRequestorType
 import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
-import eu.europa.ec.eudi.pidissuer.adapter.out.authenticatedChannelAlgorithm
-import eu.europa.ec.eudi.pidissuer.adapter.out.jose.ExtractJwkFromCredentialKey
-import eu.europa.ec.eudi.pidissuer.adapter.out.jose.ValidateProof
-import eu.europa.ec.eudi.pidissuer.adapter.out.signingAlgorithm
 import eu.europa.ec.eudi.pidissuer.domain.AttributeDetails
-import eu.europa.ec.eudi.pidissuer.domain.CNonce
 import eu.europa.ec.eudi.pidissuer.domain.CredentialConfigurationId
-import eu.europa.ec.eudi.pidissuer.domain.CredentialIdentifier
 import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerId
-import eu.europa.ec.eudi.pidissuer.domain.CredentialRequest
-import eu.europa.ec.eudi.pidissuer.domain.CredentialResponse
-import eu.europa.ec.eudi.pidissuer.domain.CryptographicBindingMethod
-import eu.europa.ec.eudi.pidissuer.domain.IssuedCredential
-import eu.europa.ec.eudi.pidissuer.domain.ProofType
-import eu.europa.ec.eudi.pidissuer.domain.SD_JWT_VC_FORMAT
 import eu.europa.ec.eudi.pidissuer.domain.Scope
 import eu.europa.ec.eudi.pidissuer.domain.SdJwtVcCredentialConfiguration
 import eu.europa.ec.eudi.pidissuer.domain.SdJwtVcType
-import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationContext
-import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError
-import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError.InvalidProof
-import eu.europa.ec.eudi.pidissuer.port.out.IssueSpecificCredential
-import eu.europa.ec.eudi.pidissuer.port.out.persistence.GenerateNotificationId
-import eu.europa.ec.eudi.pidissuer.port.out.persistence.StoreIssuedCredential
-import eu.europa.ec.eudi.sdjwt.HashAlgorithm
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
-import org.slf4j.LoggerFactory
+import eu.europa.ec.eudi.sdjwt.HashAlgorithm.SHA_256
 import java.time.Clock
 import java.time.Instant
 import java.time.ZonedDateTime
 import java.util.Locale
 
 val PidSdJwtVcScope: Scope = Scope("${PID_DOCTYPE}_vc_sd_jwt")
-
-
-interface IsAttribute {
-    val attribute: AttributeDetails
-}
+val PidSdJwtVcScopeNew: Scope = Scope("${PID_DOCTYPE_SDJWTVC}_vc_sd_jwt")
+val PidSdJwtVcScopeNew2: Scope = Scope("${PID_DOCTYPE_SDJWTVC_NEW}_vc_sd_jwt")
 
 internal object Attributes {
+
+    val GivenName = AttributeDetails(
+        name = "given_name",
+        mandatory = false,
+        display = mapOf(Locale.ENGLISH to "Current First Names"),
+        operationSetter = OperationsRequestorType::setGivenNames
+    )
+
+    val FamilyName: AttributeDetails by lazy {
+        AttributeDetails(
+            name = "family_name",
+            mandatory = false,
+            display = mapOf(Locale.ENGLISH to "Current Family Name"),
+            operationSetter = OperationsRequestorType::setFamilyNames
+        )
+    }
 
     val BirthDateYear = AttributeDetails(
         name = "age_birth_year",
         mandatory = false,
         operationSetter = OperationsRequestorType::setDateOfBirth
     )
+
     val AgeEqualOrOver = AttributeDetails(
         name = "age_equal_or_over",
         mandatory = false,
         display = mapOf(Locale.ENGLISH to "Age attestations"),
-        operationSetter = OperationsRequestorType::setDateOfBirth
-    )
-    val AgeOver18 = AttributeDetails(
-        name = "age_over_18",
-        mandatory = false,
-        display = mapOf(Locale.ENGLISH to "Adult or minor"),
         operationSetter = OperationsRequestorType::setAgeVerification
     )
 
@@ -108,12 +87,12 @@ internal object Attributes {
     )
 
     val IssuanceDate = AttributeDetails(
-        name = "issuance_date",
+        name = "iat",
         mandatory = false,
     )
 
     val ExpiryDate = AttributeDetails(
-        name = "expiry_date",
+        name = "exp",
         mandatory = false,
         operationSetter = OperationsRequestorType::setDateOfExpiry
     )
@@ -128,132 +107,40 @@ internal object Attributes {
         mandatory = false,
         operationSetter = OperationsRequestorType::setIssuingState
     )
-
-    val FamilyName: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "family_name",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Current Family Name"),
-            operationSetter = OperationsRequestorType::setFamilyNames
-        )
-    }
-
-    val GivenName = AttributeDetails(
-        name = "given_name",
-        mandatory = false,
-        display = mapOf(Locale.ENGLISH to "Current First Names"),
-        operationSetter = OperationsRequestorType::setGivenNames
-    )
-
     val BirthDate = AttributeDetails(
-        name = "birth_date",
+        name = "birthdate",
         mandatory = false,
         display = mapOf(Locale.ENGLISH to "Date of Birth"),
         operationSetter = OperationsRequestorType::setDateOfBirth
     )
 
-    val Gender: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "gender",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "PID User’s gender, using a value as defined in ISO/IEC 5218."),
-        )
-    }
 
     val BirthPlace: AttributeDetails by lazy {
         AttributeDetails(
-            name = "birth_place",
+            name = "place_of_birth",
             mandatory = false,
             display = mapOf(Locale.ENGLISH to "Place of Birth"),
             operationSetter = OperationsRequestorType::setPlaceOfBirth
         )
     }
 
-    val BirthCountry: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "birth_country",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Country of Birth"),
-            operationSetter = OperationsRequestorType::setPlaceOfBirth
-        )
-    }
 
-    val BirthState: AttributeDetails by lazy {
+    val Address: AttributeDetails by lazy {
         AttributeDetails(
-            name = "birth_state",
+            name = "address",
             mandatory = false,
-            display = mapOf(Locale.ENGLISH to "State of Birth"),
-            operationSetter = OperationsRequestorType::setPlaceOfBirth
-        )
-    }
-
-    val BirthCity: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "birth_city",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "City of Birth"),
-            operationSetter = OperationsRequestorType::setPlaceOfBirth
-        )
-    }
-
-    val ResidentAddress: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "resident_address",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Residence address"),
-            operationSetter = OperationsRequestorType::setPlaceOfResidence
-        )
-    }
-
-    val ResidentCountry: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "resident_country",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Residence country"),
-            operationSetter = OperationsRequestorType::setPlaceOfResidence
-        )
-    }
-
-    val ResidentState: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "resident_state",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Residence state"),
-            operationSetter = OperationsRequestorType::setPlaceOfResidence
-        )
-    }
-
-    val ResidentCity: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "resident_city",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Residence city"),
-            operationSetter = OperationsRequestorType::setPlaceOfResidence
-        )
-    }
-
-    val ResidentPostalCode: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "resident_postal_code",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Residence postal code"),
-            operationSetter = OperationsRequestorType::setPlaceOfResidence
-        )
-    }
-    val ResidentStreet: AttributeDetails by lazy {
-        AttributeDetails(
-            name = "resident_street",
-            mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Residence street"),
+            display = mapOf(
+                Locale.ENGLISH to "Resident street_address, country, region, locality and postal_code",
+            ),
             operationSetter = OperationsRequestorType::setPlaceOfResidence
         )
     }
 
     val Nationality: AttributeDetails by lazy {
         AttributeDetails(
-            name = "nationality",
+            name = "nationalities",
             mandatory = false,
-            display = mapOf(Locale.ENGLISH to "Nationality"),
+            display = mapOf(Locale.ENGLISH to "Nationalities"),
             operationSetter = OperationsRequestorType::setNationality
         )
     }
@@ -268,10 +155,20 @@ internal object Attributes {
 
     val FamiltyNameBirth: AttributeDetails by lazy {
         AttributeDetails(
-            name = "family_name_birth",
+            name = "birth_family_name",
             mandatory = false,
             display = mapOf(Locale.ENGLISH to "Last name(s) or surname(s) of the PID User at the time of birth."),
             operationSetter = OperationsRequestorType::setBirthName
+        )
+    }
+
+
+    val AlsoKnownAs: AttributeDetails by lazy {
+        AttributeDetails(
+            name = "also_known_as",
+            mandatory = false,
+            display = mapOf(Locale.ENGLISH to "Artistic name"),
+            operationSetter = OperationsRequestorType::setArtisticName
         )
     }
 
@@ -281,121 +178,37 @@ internal object Attributes {
         BirthDate,
         AgeEqualOrOver,
         AgeInYears,
-        AgeOver18,
         IssuanceDate,
         BirthDateYear,
-        Gender,
         Nationality,
         FamiltyNameBirth,
-        BirthCity,
         BirthPlace,
-        BirthState,
-        BirthCountry,
-        ResidentCity,
-        ResidentState,
-        ResidentStreet,
-        ResidentAddress,
-        ResidentPostalCode,
-        ResidentCountry,
         ExpiryDate,
         IssuingCountry,
         IssuingAuthority,
-        SourceDocumentType
+        SourceDocumentType,
+        Address,
+        AlsoKnownAs
     )
 }
 
-fun pidSdJwtVcV1(vararg signingAlgorithm: JWSAlgorithm): SdJwtVcCredentialConfiguration =
+fun pidSdJwtVcV1(
+    issuerSigningKey: IssuerSigningKey,
+    issuerId: CredentialIssuerId,
+    clock: Clock,
+    calcNotUseBefore: TimeDependant<Instant>?,
+    docType: SdJwtVcType = pidDocType(1),
+    scope: Scope = PidSdJwtVcScope
+): SdJwtVcCredentialConfiguration<Pid> =
     SdJwtVcCredentialConfiguration(
-        id = CredentialConfigurationId(PidSdJwtVcScope.value),
-        type = SdJwtVcType(pidDocType(1)),
+        id = CredentialConfigurationId(scope.value),
+        docType = docType,
         display = pidDisplay,
         claims = Attributes.pidAttributes,
-        cryptographicBindingMethodsSupported = nonEmptySetOf(CryptographicBindingMethod.Jwk),
-        credentialSigningAlgorithmsSupported = signingAlgorithm.toSet().toNonEmptySetOrNull()!!,
-        scope = PidSdJwtVcScope,
-        proofTypesSupported = nonEmptySetOf(ProofType.Jwt(nonEmptySetOf(JWSAlgorithm.RS256, JWSAlgorithm.ES256))),
+        scope = scope,
+        issuerId = issuerId,
+        issuerSigningKey = issuerSigningKey,
+        encode = EncodePidInSdJwtVc(issuerId, clock, SHA_256, issuerSigningKey, calcNotUseBefore, docType)
     )
 
 typealias TimeDependant<F> = (ZonedDateTime) -> F
-
-private val log = LoggerFactory.getLogger(IssueSdJwtVcPid::class.java)
-
-/**
- * Service for issuing PID SD JWT credential
- */
-class IssueSdJwtVcPid(
-    credentialIssuerId: CredentialIssuerId,
-    private val clock: Clock,
-    hashAlgorithm: HashAlgorithm,
-    private val issuerSigningKey: IssuerSigningKey,
-    private val getPidData: GetPidData,
-    private val extractJwkFromCredentialKey: ExtractJwkFromCredentialKey,
-    calculateExpiresAt: TimeDependant<Instant>,
-    calculateNotUseBefore: TimeDependant<Instant>?,
-    private val notificationsEnabled: Boolean,
-    private val generateNotificationId: GenerateNotificationId,
-    private val storeIssuedCredential: StoreIssuedCredential,
-) : IssueSpecificCredential<JsonElement> {
-
-    private val validateProof = ValidateProof(credentialIssuerId)
-
-    override val supportedCredential: SdJwtVcCredentialConfiguration =
-        pidSdJwtVcV1(issuerSigningKey.signingAlgorithm, issuerSigningKey.authenticatedChannelAlgorithm)
-    override val publicKey: JWK
-        get() = issuerSigningKey.key.toPublicJWK()
-
-    private val encodePidInSdJwt = EncodePidInSdJwtVc(
-        credentialIssuerId,
-        clock,
-        hashAlgorithm,
-        issuerSigningKey,
-        calculateExpiresAt,
-        calculateNotUseBefore,
-        supportedCredential.type,
-    )
-
-    context(Raise<IssueCredentialError>)
-    override suspend fun invoke(
-        authorizationContext: AuthorizationContext,
-        request: CredentialRequest,
-        credentialIdentifier: CredentialIdentifier?,
-        expectedCNonce: CNonce,
-    ): CredentialResponse<JsonElement> = coroutineScope {
-        log.info("Handling issuance request ...")
-        val holderPubKey = async(Dispatchers.Default) { holderPubKey(request, expectedCNonce) }
-        val pidData = async { getPidData(authorizationContext) }
-        val (pid, pidMetaData) = pidData.await()
-        val sdJwt = encodePidInSdJwt(pid, pidMetaData, holderPubKey.await(), request.verifierKA)
-
-        val notificationId =
-            if (notificationsEnabled) generateNotificationId()
-            else null
-        storeIssuedCredential(
-            IssuedCredential(
-                format = SD_JWT_VC_FORMAT,
-                type = supportedCredential.type.value,
-                holderPublicKey = holderPubKey.await().toPublicJWK(),
-                issuedAt = clock.instant(),
-                notificationId = notificationId,
-            ),
-        )
-
-        CredentialResponse.Issued(JsonPrimitive(sdJwt), notificationId)
-            .also {
-                log.info("Successfully issued PID")
-                log.debug("Issued PID data {}", it)
-            }
-    }
-
-    context(Raise<InvalidProof>)
-    private suspend fun holderPubKey(
-        request: CredentialRequest,
-        expectedCNonce: CNonce,
-    ): JWK {
-        val key = validateProof(request.unvalidatedProof, expectedCNonce, supportedCredential)
-        return extractJwkFromCredentialKey(key)
-            .getOrElse {
-                raise(InvalidProof("Unable to extract JWK from CredentialKey", it))
-            }
-    }
-}

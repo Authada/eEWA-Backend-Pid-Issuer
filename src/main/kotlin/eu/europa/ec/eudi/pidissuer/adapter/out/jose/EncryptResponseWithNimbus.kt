@@ -51,7 +51,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import java.time.Clock
 import java.time.Instant
-import java.util.*
+import java.util.Date
 
 /**
  * Implementation of [EncryptDeferredResponse] using Nimbus.
@@ -142,7 +142,7 @@ private class EncryptResponse(
 
     private fun asJwtClaimSet(iat: Instant, responseAsJwtClaims: JWTClaimsSet.Builder.() -> Unit) =
         JWTClaimsSet.Builder().apply {
-            issuer(issuer.externalForm)
+            issuer(issuer)
             issueTime(Date.from(iat))
             this.responseAsJwtClaims()
         }.build()

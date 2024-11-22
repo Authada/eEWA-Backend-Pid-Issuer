@@ -20,7 +20,7 @@
 
 h2 {
     color: #6e23d2;
-    font-size: 16pt;
+    font-size: 24pt;
 }
 
 h4 {
@@ -93,4 +93,12 @@ body {
 .form-check-input:checked {
     background-color: #6e23d2;
     border-color: #6e23d2;
+}
+
+.wider {
+    width: 300px;
+}
+
+.spaced + .spaced {
+    margin-top: 20px;
 }

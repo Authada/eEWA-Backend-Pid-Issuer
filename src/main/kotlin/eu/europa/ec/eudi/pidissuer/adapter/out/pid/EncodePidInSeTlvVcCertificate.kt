@@ -18,6 +18,8 @@ package eu.europa.ec.eudi.pidissuer.adapter.out.pid
 import arrow.core.raise.Raise
 import com.nimbusds.jose.jwk.JWK
 import com.nimbusds.jose.util.Base64URL
+import eu.europa.ec.eudi.pidissuer.adapter.out.Encode
+import eu.europa.ec.eudi.pidissuer.domain.VerifierKA
 import eu.europa.ec.eudi.pidissuer.domain.tlv.PIDTLVPayload
 import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError
 import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError.Unexpected
@@ -27,15 +29,15 @@ private val log = LoggerFactory.getLogger(EncodePidInSdJwtVc::class.java)
 
 class EncodePidInSeTlvVcCertificate(
     private val issuer: AuthenticatedChannelCertificateIssuer
-) {
+) : Encode<Pid> {
 
-    context(Raise<IssueCredentialError>)
-    operator fun invoke(
-        pid: Pid,
-        pidMetaData: PidMetaData,
+
+    context(Raise<IssueCredentialError>) override suspend fun invoke(
+        data: Pid,
         holderKey: JWK,
-    ): Base64URL {
-        val seTlv = PIDTLVPayload(pid, pidMetaData)
+        verifierKA: VerifierKA?
+    ): String {
+        val seTlv = PIDTLVPayload(data)
 
         val issue = issuer(holderKey)
         val issuedSeTlvVc: Base64URL = issue(seTlv).getOrElse {
@@ -45,6 +47,6 @@ class EncodePidInSeTlvVcCertificate(
             log.info(issuedSeTlvVc.toString())
         }
 
-        return issuedSeTlvVc
+        return issuedSeTlvVc.toString()
     }
 }

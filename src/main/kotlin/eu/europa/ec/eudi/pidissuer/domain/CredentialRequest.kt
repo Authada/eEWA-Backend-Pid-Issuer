@@ -183,7 +183,7 @@ sealed interface CredentialRequest {
 }
 
 context(Raise<String>)
-fun CredentialRequest.assertIsSupported(meta: CredentialConfiguration) =
+fun CredentialRequest.assertIsSupported(meta: CredentialConfiguration<*>) =
     when (this) {
         is MsoMdocCredentialRequest -> {
             ensure(meta is MsoMdocCredentialConfiguration) { "Was expecting a ${MSO_MDOC_FORMAT.value}" }

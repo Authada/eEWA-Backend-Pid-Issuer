@@ -31,30 +31,44 @@
 package eu.europa.ec.eudi.pidissuer.domain
 
 import arrow.core.NonEmptySet
+import arrow.core.nonEmptySetOf
 import arrow.core.raise.Raise
 import arrow.core.raise.ensure
+import arrow.core.toNonEmptySetOrNull
 import com.nimbusds.jose.JWSAlgorithm
-import com.nimbusds.jose.jwk.JWK
+import eu.europa.ec.eudi.pidissuer.adapter.out.Encode
+import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
+import eu.europa.ec.eudi.pidissuer.adapter.out.authenticatedChannelAlgorithm
+import eu.europa.ec.eudi.pidissuer.adapter.out.signingAlgorithm
 
 const val SD_JWT_VC_FORMAT_VALUE = "vc+sd-jwt"
 val SD_JWT_VC_FORMAT = Format(SD_JWT_VC_FORMAT_VALUE)
 
-@JvmInline
-value class SdJwtVcType(val value: String)
+typealias SdJwtVcType = String
 
 /**
  * @param type As defined in https://datatracker.ietf.org/doc/html/draft-ietf-oauth-sd-jwt-vc-00#type-claim
  */
-data class SdJwtVcCredentialConfiguration(
+data class SdJwtVcCredentialConfiguration<T>(
     override val id: CredentialConfigurationId,
-    val type: SdJwtVcType,
+    override val docType: SdJwtVcType,
     override val scope: Scope? = null,
-    override val cryptographicBindingMethodsSupported: NonEmptySet<CryptographicBindingMethod>,
-    override val credentialSigningAlgorithmsSupported: NonEmptySet<JWSAlgorithm>,
     override val display: List<CredentialDisplay>,
     val claims: List<AttributeDetails>,
-    override val proofTypesSupported: NonEmptySet<ProofType>,
-) : CredentialConfiguration
+    override val encode: Encode<T>,
+    override val issuerSigningKey: IssuerSigningKey,
+    override val issuerId: CredentialIssuerId,
+) : CredentialConfiguration<T>{
+    val order: List<String> = claims.map { it.name }
+    override val format: Format
+        get() = SD_JWT_VC_FORMAT
+    override val cryptographicBindingMethodsSupported: NonEmptySet<CryptographicBindingMethod> = nonEmptySetOf(CryptographicBindingMethod.Jwk)
+    override val credentialSigningAlgorithmsSupported: NonEmptySet<JWSAlgorithm> = setOf(
+        issuerSigningKey.signingAlgorithm,
+        issuerSigningKey.authenticatedChannelAlgorithm
+    ).toNonEmptySetOrNull()!!
+    override val proofTypesSupported: NonEmptySet<ProofType> = nonEmptySetOf(ProofType.Jwt(nonEmptySetOf(JWSAlgorithm.RS256, JWSAlgorithm.ES256)))
+}
 
 //
 // Credential Offer
@@ -70,8 +84,8 @@ data class SdJwtVcCredentialRequest(
 }
 
 context(Raise<String>)
-internal fun SdJwtVcCredentialRequest.validate(meta: SdJwtVcCredentialConfiguration) {
-    ensure(type == meta.type) { "doctype is $type but was expecting ${meta.type}" }
+internal fun SdJwtVcCredentialRequest.validate(meta: SdJwtVcCredentialConfiguration<*>) {
+    ensure(type == meta.docType) { "doctype is $type but was expecting ${meta.docType}" }
     if (meta.claims.isEmpty()) {
         ensure(claims.isEmpty()) { "Requested claims should be empty. " }
     } else {

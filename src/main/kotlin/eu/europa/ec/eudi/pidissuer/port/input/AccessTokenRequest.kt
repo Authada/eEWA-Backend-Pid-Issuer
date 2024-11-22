@@ -19,16 +19,20 @@ import arrow.core.getOrElse
 import arrow.core.raise.Raise
 import arrow.core.raise.either
 import com.nimbusds.jose.util.Base64URL
-import com.nimbusds.oauth2.sdk.AuthorizationCodeGrant
 import com.nimbusds.oauth2.sdk.Scope
-import com.nimbusds.oauth2.sdk.TokenRequest
 import com.nimbusds.oauth2.sdk.pkce.CodeChallenge
 import com.nimbusds.oauth2.sdk.token.DPoPAccessToken
 import com.nimbusds.oauth2.sdk.token.TokenTypeURI
 import eu.europa.ec.eudi.pidissuer.adapter.input.web.security.DPoPConfigurationProperties
+import eu.europa.ec.eudi.pidissuer.domain.AuthorizationSession
 import eu.europa.ec.eudi.pidissuer.domain.CNonce
 import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerId
 import eu.europa.ec.eudi.pidissuer.domain.ValidateWalletAttestation
+import eu.europa.ec.eudi.pidissuer.patch.AuthorizationCodeGrant
+import eu.europa.ec.eudi.pidissuer.patch.PreAuthorizedCodeGrant
+import eu.europa.ec.eudi.pidissuer.patch.PreAuthorizedCodeGrant.Companion.TX_CODE_PARAM
+import eu.europa.ec.eudi.pidissuer.patch.TokenRequest
+import eu.europa.ec.eudi.pidissuer.patch.WalletClientAttestation
 import eu.europa.ec.eudi.pidissuer.port.input.AccessTokenRequestError.InvalidRequest
 import eu.europa.ec.eudi.pidissuer.port.out.persistence.GenerateCNonce
 import eu.europa.ec.eudi.pidissuer.port.out.persistence.GetAuthorizationSessionByRequestUriOnce
@@ -68,43 +72,42 @@ class AccessTokenRequest(
     private val validateWalletAttestation: ValidateWalletAttestation,
     private val upsertCNonce: UpsertCNonce,
     private val generateCNonce: GenerateCNonce,
-    ) {
+) {
     context(Raise<AccessTokenRequestError>)
     suspend operator fun invoke(
         requestParams: TokenRequest,
         dPoP: com.nimbusds.jwt.SignedJWT,
-        walletClientAttestation: WalletClientAttestation
     ): Pair<DPoPAccessToken, CNonce> {
         either {
-            walletClientAttestation.validate { attestation, attestationPop ->
-                validateWalletAttestation(
-                    requestParams.clientID.value,
-                    credentialIssuerId,
-                    attestation,
-                    attestationPop
-                )
+            with(requestParams.clientAuthentication!! as WalletClientAttestation) {
+                validate { attestation, attestationPop ->
+                    validateWalletAttestation(
+                        clientID.value,
+                        credentialIssuerId,
+                        attestation,
+                        attestationPop
+                    )
+                }
             }
         }.getOrElse {
             raise(InvalidRequest(""))
         }
-        val authorizationCodeGrant = requestParams.authorizationGrant as AuthorizationCodeGrant
-        log.info("AuthorizationCodeGrand {}", authorizationCodeGrant)
 
-        val clientId = requestParams.clientID.value
-        val session = getAuthorizationSessionByRequestUriOnce(
-            URI(authorizationCodeGrant.authorizationCode.value),
-            clientId
-        )
-        log.info("Session retrieved")
-        val computedCodeChallenge =
-            CodeChallenge.compute(session.authRequest.codeChallengeMethod, authorizationCodeGrant.codeVerifier)
-        val parsedCodeChallenge = CodeChallenge.parse(session.authRequest.codeChallenge.value)
+        log.info("ClientAuth ${requestParams.clientAuthentication}")
+        log.info("ClientAuth clientId ${requestParams.clientAuthentication?.clientID?.value}")
 
-        log.info("Code challenge computed {} : {}", computedCodeChallenge.value, parsedCodeChallenge.value)
+        val clientId = requestParams.clientAuthentication.clientID.value
+        val grant = requestParams.authorizationGrant
+        val session = when (grant) {
+            is AuthorizationCodeGrant -> {
+                authorizationCode(grant, clientId)
+            }
 
-        if (parsedCodeChallenge != computedCodeChallenge) {
-            log.info("Code verifier invalid")
-            raise(InvalidRequest("")) //TODO proper message
+            is PreAuthorizedCodeGrant -> {
+                preAuthorizedCode(grant)
+            }
+
+            else -> raise(InvalidRequest("Unsupported grant type"))
         }
 
         log.info("Generating new request_uri")
@@ -113,7 +116,8 @@ class AccessTokenRequest(
 
         log.info("Storing principal information")
         val jwkThumbprint = dPoP.header.jwk.computeThumbprint()
-        val validatedScope = session.authRequest.scope ?: Scope.parse(session.matchedAttributeDetails.keys.map { it.value }) // TODO validate with auth request
+        val validatedScope = session.authRequest.scope
+            ?: Scope.parse(session.matchedAttributeDetails.keys.map { it.value }) // TODO validate with auth request
         storePrincipal(
             requestUri.toString(),
             AccessTokenMetadata(
@@ -138,6 +142,45 @@ class AccessTokenRequest(
         return dPoPAccessToken to cnonce
     }
 
+    context(Raise<AccessTokenRequestError>)
+    suspend fun authorizationCode(
+        authorizationCodeGrant: AuthorizationCodeGrant,
+        clientId: String
+    ): AuthorizationSession {
+        val session = getAuthorizationSessionByRequestUriOnce(
+            URI(authorizationCodeGrant.authorizationCode.value),
+            clientId
+        )
+        log.info("Session retrieved")
+        val computedCodeChallenge =
+            CodeChallenge.compute(session.authRequest.codeChallengeMethod, authorizationCodeGrant.codeVerifier)
+        val parsedCodeChallenge = CodeChallenge.parse(session.authRequest.codeChallenge.value)
+
+        log.info("Code challenge computed {} : {}", computedCodeChallenge.value, parsedCodeChallenge.value)
+
+        if (parsedCodeChallenge != computedCodeChallenge) {
+            log.info("Code verifier invalid")
+            raise(InvalidRequest(""))
+        }
+        return session
+    }
+
+    context(Raise<AccessTokenRequestError>)
+    suspend fun preAuthorizedCode(
+        preAuthorizedCodeGrant: PreAuthorizedCodeGrant,
+    ): AuthorizationSession {
+        val session = getAuthorizationSessionByRequestUriOnce(
+            URI(preAuthorizedCodeGrant.preAuthorizedCode),
+            PREAUTHORIZED_CLIENTID
+        )
+
+        if (preAuthorizedCodeGrant.txCode.isNullOrBlank()) {
+            raise(InvalidRequest("Invalid $TX_CODE_PARAM"))
+        }
+
+        return session
+    }
+
 
     data class AccessTokenMetadata(
         val clientId: String,
@@ -149,5 +192,6 @@ class AccessTokenRequest(
 
     companion object {
         private val log = LoggerFactory.getLogger(AccessTokenRequest::class.java)
+        val PREAUTHORIZED_CLIENTID = "pre-authorized"
     }
 }

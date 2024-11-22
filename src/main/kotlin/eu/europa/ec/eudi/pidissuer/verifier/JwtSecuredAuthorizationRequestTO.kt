@@ -28,38 +28,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package eu.europa.ec.eudi.pidissuer.domain
+package eu.europa.ec.eudi.pidissuer.verifier
 
-import com.nimbusds.jose.JWSAlgorithm
-import com.nimbusds.jwt.SignedJWT as NimbusSignedJWT
-
-//
-// Credential MetaData
-//
-
-const val JWT_VS_JSON_FORMAT_VALUE = "jwt_vc_json"
-val JWT_VS_JSON_FORMAT = Format(JWT_VS_JSON_FORMAT_VALUE)
+import kotlinx.serialization.Required
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 /**
- * W3C VC signed as a JWT, not using JSON-LD (jwt_vc_json)
+ * The return value of successfully [initializing][InitTransaction] a [Presentation]
+ *
  */
-data class JwtVcJsonCredentialConfiguration(
-    override val id: CredentialConfigurationId,
-    override val scope: Scope? = null,
-    override val cryptographicBindingMethodsSupported: Set<CryptographicBindingMethod>,
-    override val credentialSigningAlgorithmsSupported: Set<JWSAlgorithm>,
-    override val display: List<CredentialDisplay>,
-    override val proofTypesSupported: Set<ProofType>,
-) : CredentialConfiguration
-
-//
-// Credential Offer
-//
-
-object DummyJwtVc
-
-/**
- * A W3C VC signed as a JWT, not using JSON-LD, Issued Credential.
- */
-@JvmInline
-value class JwtVcIssuedCredential(val credential: NimbusSignedJWT)
+@Serializable
+data class JwtSecuredAuthorizationRequestTO(
+    @Required @SerialName("presentation_id") val transactionId: String,
+    @Required @SerialName("client_id") val clientId: String,
+    @SerialName("request") val request: String? = null,
+    @SerialName("request_uri") val requestUri: String?,
+)

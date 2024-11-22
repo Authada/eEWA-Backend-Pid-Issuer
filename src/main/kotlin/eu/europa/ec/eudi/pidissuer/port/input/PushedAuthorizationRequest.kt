@@ -18,26 +18,23 @@ package eu.europa.ec.eudi.pidissuer.port.input
 import arrow.core.getOrElse
 import arrow.core.raise.Raise
 import arrow.core.raise.either
+import arrow.core.raise.ensure
 import com.nimbusds.oauth2.sdk.AuthorizationRequest
-import com.nimbusds.oauth2.sdk.Scope
-import com.nimbusds.oauth2.sdk.rar.AuthorizationDetail
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.Attributes.pidAttributes
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidMsoMdocNamespace
-import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidMsoMdocV1
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.EmailMdocScope
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.EmailSdJwtVcScope
+import eu.europa.ec.eudi.pidissuer.adapter.out.email.EmailSdJwtVcScopeNew
+import eu.europa.ec.eudi.pidissuer.adapter.out.mdl.MobileDrivingLicenceV1Scope
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.MsisdnSdJwtVcScope
+import eu.europa.ec.eudi.pidissuer.adapter.out.msisdn.MsisdnSdJwtVcScopeNew
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidMsoMdocScope
 import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidSdJwtVcScope
-import eu.europa.ec.eudi.pidissuer.domain.AttributeDetails
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidSdJwtVcScopeNew
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidSdJwtVcScopeNew2
+import eu.europa.ec.eudi.pidissuer.adapter.out.pid.PidSeTlvVcCertificateScope
 import eu.europa.ec.eudi.pidissuer.domain.AuthorizationSession
-import eu.europa.ec.eudi.pidissuer.domain.CredentialConfiguration
 import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerId
-import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerMetaData
-import eu.europa.ec.eudi.pidissuer.domain.JwtVcJsonCredentialConfiguration
-import eu.europa.ec.eudi.pidissuer.domain.MSO_MDOC_FORMAT_VALUE
-import eu.europa.ec.eudi.pidissuer.domain.MsoMdocCredentialConfiguration
-import eu.europa.ec.eudi.pidissuer.domain.SD_JWT_VC_FORMAT_VALUE
-import eu.europa.ec.eudi.pidissuer.domain.SE_TLV_FORMAT_VALUE
-import eu.europa.ec.eudi.pidissuer.domain.SdJwtVcCredentialConfiguration
-import eu.europa.ec.eudi.pidissuer.domain.SeTlvVcCredentialConfiguration
 import eu.europa.ec.eudi.pidissuer.domain.ValidateWalletAttestation
+import eu.europa.ec.eudi.pidissuer.patch.WalletClientAttestation
 import eu.europa.ec.eudi.pidissuer.port.out.persistence.StoreAuthorizationSession
 import eu.europa.ec.eudi.pidissuer.port.out.persistence.StoreRequestUriReference
 import org.slf4j.Logger
@@ -55,6 +52,14 @@ sealed interface PARError {
     data class InvalidAuthorizationDetails(val description: String) : PARError
 }
 
+enum class AuthenticationType {
+    EID,
+    LOGIN,
+    EMAIL_VERIFICATION,
+    MSISDN_ATTESTATION,
+    PREAUTHORIZED
+}
+
 data class RequestUri(
     val uri: URI,
     val expiration: Instant
@@ -65,7 +70,7 @@ class PushedAuthorizationRequest(
     private val storeRequestUriReference: StoreRequestUriReference,
     private val credentialIssuerId: CredentialIssuerId,
     private val validateWalletAttestation: ValidateWalletAttestation,
-    private val metadata: CredentialIssuerMetaData
+    private val getAttributeDetails: GetAttributeDetails
 ) {
     context(Raise<PARError>)
     suspend operator fun invoke(
@@ -84,125 +89,63 @@ class PushedAuthorizationRequest(
         }.getOrElse {
             raise(PARError.InvalidClientAssertion)
         }
+
         val requestUriParam = UUID.randomUUID()
         val requestUri = URI("urn:ietf:params:oauth:request_uri:$requestUriParam")
         val attributeDetails = getAttributeDetails(authRequest.scope, authRequest.authorizationDetails)
+
+        val type = attributeDetails.keys.map {
+            when {
+                it in MDL_SCOPES -> {
+                    LOGGER.info("MDL requested")
+                    AuthenticationType.LOGIN
+                }
+
+                it in PID_SCOPES -> {
+                    LOGGER.info("PID requested")
+                    AuthenticationType.EID
+                }
+
+                it in EMAIL_SCOPES -> {
+                    LOGGER.info("Email requested")
+                    AuthenticationType.EMAIL_VERIFICATION
+                }
+
+                it in MSISDN_SCOPES -> {
+                    LOGGER.info("MSISDN requested")
+                    AuthenticationType.MSISDN_ATTESTATION
+                }
+
+                else -> {
+                    LOGGER.info("defaulting to PID requested")
+                    AuthenticationType.EID
+                }
+            }
+        }.toSet()
+
+        ensure(type.size == 1) {
+            raise(PARError.InvalidScope("Cannot have scopes with different authentication types in the same authorization request"))
+        }
+
         LOGGER.info("Activated attribute details $attributeDetails")
         val session = AuthorizationSession(
             authRequest,
-            attributeDetails
+            attributeDetails,
+            type.first()
         )
         storeAuthorizationSession(session)
         storeRequestUriReference(requestUri, authRequest.clientID.value, session.id)
-        return RequestUri(requestUri, Instant.now().plus(Duration.ofMinutes(30)))
+        return RequestUri(requestUri, Instant.now().plus(Duration.ofMinutes(30))) //TODO move duration to config
 
     }
 
-    context(Raise<PARError>)
-    private fun getAttributeDetails(
-        scope: Scope?,
-        authorizationDetails: List<AuthorizationDetail>?
-    ): Map<eu.europa.ec.eudi.pidissuer.domain.Scope, List<AttributeDetails>> {
-        val result: Map<eu.europa.ec.eudi.pidissuer.domain.Scope, List<AttributeDetails>> =
-            if (scope?.toStringList().isNullOrEmpty().not()) {
-                metadata.credentialConfigurationsSupported.filter { it.scope!!.value in scope!!.toStringList() }.map {
-                    it.scope!! to when (it) {
-                        is MsoMdocCredentialConfiguration -> it.msoClaims.values.flatMap { it }
-                        is SdJwtVcCredentialConfiguration -> it.claims
-                        is SeTlvVcCredentialConfiguration -> it.claims
-                        else -> throw IllegalStateException()
-                    }
-                }.toMap()
-            } else if (authorizationDetails.isNullOrEmpty().not()) {
-                authorizationDetails!!.map { details ->
-                    val credConfId = details.getStringField("credential_configuration_id")
-                    val format = details.getStringField("format")
-
-                    val (foundScope, availableClaims) = if (credConfId != null) {
-                        getAttributesForConfigurationId(credConfId)
-                    } else if (format != null) {
-                        getAttributesforFormat(format)
-                    } else {
-                        throw IllegalStateException()
-                    }
-
-                    val claims = details.getJSONObjectField("claims")
-
-                    val requestedClaims = (claims?.get(PidMsoMdocNamespace) as? Map<*, *>)?.keys ?: claims?.keys
-
-                    val requestedAttributeDetails =
-                        if (!requestedClaims.isNullOrEmpty()) {
-                            availableClaims.filter { it.name in requestedClaims }
-                                .takeIf { it.isNotEmpty() }
-                        } else availableClaims
-
-                    foundScope to (requestedAttributeDetails ?: emptyList())
-                }.toMap()
-            } else {
-                throw IllegalArgumentException()
-            }
-        return result
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun getAttributesforFormat(
-        format: String
-    ): Pair<eu.europa.ec.eudi.pidissuer.domain.Scope, List<AttributeDetails>> {
-
-        return when (format) {
-            MSO_MDOC_FORMAT_VALUE -> {
-                PidMsoMdocV1.scope!! to PidMsoMdocV1.msoClaims.flatMap {
-                    it.value.filter {
-                        it.operationSetter != null
-                    }
-                }
-            }
-
-            SD_JWT_VC_FORMAT_VALUE -> {
-                PidSdJwtVcScope to pidAttributes.filter {
-                    it.operationSetter != null
-                }
-            }
-
-            SE_TLV_FORMAT_VALUE -> {
-                PidSdJwtVcScope to pidAttributes.filter {
-                    it.operationSetter != null
-                }
-            }
-
-            else -> throw IllegalArgumentException()
-        }
-    }
-
-    private fun getAttributesForConfigurationId(credConfId: String?): Pair<eu.europa.ec.eudi.pidissuer.domain.Scope, List<AttributeDetails>> {
-        val config = credentialConfiguration(credConfId)
-        return when (config) {
-            is MsoMdocCredentialConfiguration -> {
-                config.scope!! to config.msoClaims.flatMap {
-                    it.value.filter { it.operationSetter != null }
-                }
-            }
-
-            is SdJwtVcCredentialConfiguration -> {
-                config.scope!! to config.claims.filter { it.operationSetter != null }
-            }
-
-            is SeTlvVcCredentialConfiguration -> {
-                config.scope!! to config.claims.filter { it.operationSetter != null }
-            }
-
-            is JwtVcJsonCredentialConfiguration, null -> throw IllegalArgumentException()
-        }
-    }
-
-    private fun credentialConfiguration(credConfId: String?): CredentialConfiguration? {
-        val config = metadata.credentialConfigurationsSupported.find {
-            it.id.value == credConfId
-        }
-        return config
-    }
 
     companion object {
         val LOGGER: Logger = LoggerFactory.getLogger(PushedAuthorizationRequest::class.java)
+        val PID_SCOPES =
+            setOf(PidSdJwtVcScope, PidMsoMdocScope, PidSeTlvVcCertificateScope, PidSdJwtVcScopeNew, PidSdJwtVcScopeNew2)
+        val MDL_SCOPES = setOf(MobileDrivingLicenceV1Scope)
+        val EMAIL_SCOPES = setOf(EmailSdJwtVcScope, EmailMdocScope, EmailSdJwtVcScopeNew)
+        val MSISDN_SCOPES = setOf(MsisdnSdJwtVcScope, MsisdnSdJwtVcScopeNew)
     }
 }

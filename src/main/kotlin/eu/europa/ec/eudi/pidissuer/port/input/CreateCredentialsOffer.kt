@@ -42,6 +42,7 @@ import eu.europa.ec.eudi.pidissuer.domain.CredentialConfigurationId
 import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerMetaData
 import eu.europa.ec.eudi.pidissuer.port.input.CreateCredentialsOfferError.InvalidCredentialConfigurationId
 import eu.europa.ec.eudi.pidissuer.port.input.CreateCredentialsOfferError.MissingCredentialConfigurationIds
+import eu.europa.ec.eudi.pidissuer.port.input.InputModeTO.Numeric
 import kotlinx.serialization.Required
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -138,10 +139,13 @@ class CreateCredentialsOffer(
     operator fun invoke(
         unvalidatedCredentialConfigurationIds: Set<CredentialConfigurationId>,
         customCredentialsOfferUri: String? = null,
+        preAuthorizedCode: String? = null,
     ): URI {
         val offer = with(metadata) {
             val credentialConfigurationIds = validate(unvalidatedCredentialConfigurationIds)
-            authorizationCodeGrantOffer(credentialConfigurationIds)
+            preAuthorizedCode?.let {
+                preAuthorizedCodeGrantOffer(credentialConfigurationIds, it)
+            } ?: authorizationCodeGrantOffer(credentialConfigurationIds)
         }
 
         return runCatching {
@@ -158,7 +162,7 @@ context(Raise<CreateCredentialsOfferError>, CredentialIssuerMetaData)
 private fun validate(unvalidatedIds: Set<CredentialConfigurationId>): NonEmptySet<CredentialConfigurationId> {
     val nonEmptyIds = unvalidatedIds.toNonEmptySetOrNull()
     ensureNotNull(nonEmptyIds) { MissingCredentialConfigurationIds }
-    val supportedIds = credentialConfigurationsSupported.map(CredentialConfiguration::id)
+    val supportedIds = credentialConfigurationsSupported.map(CredentialConfiguration<*>::id)
     nonEmptyIds.forEach { id ->
         ensure(id in supportedIds) { InvalidCredentialConfigurationId(id) }
     }
@@ -182,8 +186,21 @@ private fun authorizationCodeGrantOffer(
     val authorizationCode = AuthorizationCodeTO()
 
     return CredentialsOfferTO(
-        id.externalForm,
+        id,
         credentialConfigurationIds.map(CredentialConfigurationId::value).toSet(),
         GrantsTO(authorizationCode),
     )
 }
+
+context(CredentialIssuerMetaData)
+private fun preAuthorizedCodeGrantOffer(
+    credentialConfigurationIds: NonEmptySet<CredentialConfigurationId>,
+    preAuthorizedCode: String
+): CredentialsOfferTO {
+    return CredentialsOfferTO(
+        id,
+        credentialConfigurationIds.map(CredentialConfigurationId::value).toSet(),
+        GrantsTO(preAuthorizedCode = PreAuthorizedCodeTO(preAuthorizedCode, TransactionCodeTO(Numeric, 6, "TAN"))),
+    )
+}
+

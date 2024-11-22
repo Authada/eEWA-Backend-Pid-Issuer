@@ -32,7 +32,9 @@ package eu.europa.ec.eudi.pidissuer.domain
 
 import arrow.core.NonEmptySet
 import arrow.core.nonEmptySetOf
+import arrow.core.raise.Raise
 import arrow.core.raise.ensure
+import arrow.core.toNonEmptySetOrNull
 import com.nimbusds.jose.JOSEObjectType
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
@@ -48,48 +50,69 @@ import com.nimbusds.jose.proc.DefaultJOSEObjectTypeVerifier
 import com.nimbusds.jose.proc.JWSKeySelector
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.proc.SingleKeyJWSKeySelector
+import com.nimbusds.jose.util.Base64
+import com.nimbusds.jose.util.X509CertChainUtils
 import com.nimbusds.jwt.JWTClaimNames
 import com.nimbusds.jwt.JWTClaimsSet
 import com.nimbusds.jwt.SignedJWT
 import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier
 import com.nimbusds.jwt.proc.DefaultJWTProcessor
 import com.nimbusds.jwt.proc.JWTProcessor
+import com.nimbusds.oauth2.sdk.auth.X509CertificateConfirmation
+import eu.europa.ec.eudi.pidissuer.adapter.input.web.TokenApi
 import eu.europa.ec.eudi.pidissuer.adapter.out.jose.parseDer
 import eu.europa.ec.eudi.pidissuer.adapter.out.persistence.InMemoryWalletAttestationNonceRepository
 import eu.europa.ec.eudi.pidissuer.adapter.out.persistence.removeIfValue
+import eu.europa.ec.eudi.pidissuer.domain.CredentialKey.DIDUrl
+import eu.europa.ec.eudi.pidissuer.domain.CredentialKey.Jwk
+import eu.europa.ec.eudi.pidissuer.domain.CredentialKey.X5c
 import eu.europa.ec.eudi.pidissuer.domain.WAVError.Invalid
 import eu.europa.ec.eudi.pidissuer.port.input.ClientId
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.bouncycastle.openssl.X509TrustedCertificateBlock
+import org.opensaml.security.x509.impl.CertPathPKIXTrustEvaluator
+import org.slf4j.LoggerFactory
+import java.security.KeyStore
+import java.security.cert.CertPathValidator
+import java.security.cert.CertificateFactory
+import java.security.cert.PKIXParameters
+import java.security.cert.TrustAnchor
+import java.security.cert.X509Certificate
 import java.security.interfaces.ECPublicKey
 import java.security.interfaces.EdECPublicKey
 import java.security.interfaces.RSAPublicKey
 import java.time.Clock
 import java.time.Instant
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 
 sealed interface WAVError {
     object Invalid : WAVError
 }
+private val log = LoggerFactory.getLogger(ValidateWalletAttestation::class.java)
 
 class ValidateWalletAttestation(
     private val inMemoryWalletAttestationNonceRepository: InMemoryWalletAttestationNonceRepository,
-    private val clock: Clock
+    private val clock: Clock,
+    private val walletProviderTrustStore: KeyStore
 ) {
 
     private val knownAttestations: MutableMap<String, Instant> = mutableMapOf()
     private val mutex = Mutex()
 
 
-    context(arrow.core.raise.Raise<WAVError>)
+    context(Raise<WAVError>)
     suspend operator fun invoke(
         clientId: ClientId,
         issuerId: CredentialIssuerId,
         unvalidatedAttestation: SignedJWT,
         unvalidatedAttestationPop: SignedJWT,
     ) {
-        val attestationClaims = getAttestationClaims(clientId, unvalidatedAttestation)
+        val (issuer, cnfJwk) = validateWalletProviderAttestation(unvalidatedAttestation.header)
+        val attestationClaims = getAttestationClaims(clientId, unvalidatedAttestation, issuer, cnfJwk)
         val cnfMap: MutableMap<String, Any> = attestationClaims!!.getJSONObjectClaim("cnf")
         @Suppress("UNCHECKED_CAST") val cnfKey = JWK.parse(cnfMap.get("jwk") as Map<String, *>)
 
@@ -108,10 +131,59 @@ class ValidateWalletAttestation(
             nonce != null &&
                     inMemoryWalletAttestationNonceRepository.checkNonceValid(nonce) &&
                     jtiValid
-
         ) {
             raise(Invalid)
         }
+    }
+
+    context(Raise<WAVError>)
+    private fun validateWalletProviderAttestation(header: JWSHeader): Pair<String, JWK> {
+        val walletProviderAttestationJwt = SignedJWT.parse(header.getCustomParam("jwt") as String)
+        val (alg, key) = algorithmAndCredentialKey(
+            walletProviderAttestationJwt.header,
+            JWSAlgorithm.Family.SIGNATURE.toNonEmptySetOrNull()!!
+        )
+
+        val chain = when (key) {
+            is DIDUrl -> X509CertChainUtils.parse(key.jwk.x509CertChain)
+            is Jwk -> X509CertChainUtils.parse(key.value.x509CertChain)
+            is X5c -> key.chain
+        }
+
+        try {
+            val certPath = CertificateFactory.getInstance("X509").generateCertPath(chain)
+            val cpv = CertPathValidator.getInstance("PKIX")
+            cpv.validate(certPath, PKIXParameters(walletProviderTrustStore).apply {
+                isRevocationEnabled = false
+            })
+        } catch (e: Exception) {
+            log.error("Certpath validation failed", e)
+            raise(Invalid)
+        }
+
+        val claims = DefaultJWTProcessor<SecurityContext>()
+            .apply {
+                jwsTypeVerifier = DefaultJOSEObjectTypeVerifier(JOSEObjectType("wallet-provider-attestation+jwt"))
+                jwsKeySelector = keySelector(key, alg)
+                jwtClaimsSetVerifier =
+                    DefaultJWTClaimsVerifier<SecurityContext?>(
+                        JWTClaimsSet.Builder()
+                            .issuer("AUTHADA")
+                            .build(),
+                        setOf(
+                            JWTClaimNames.ISSUER,
+                            JWTClaimNames.SUBJECT,
+                            JWTClaimNames.ISSUED_AT,
+                            JWTClaimNames.EXPIRATION_TIME,
+                            "cnf",
+                        ),
+                    ).apply {
+                        maxClockSkew = maxSkew.toInt(DurationUnit.SECONDS)
+                    }
+            }.process(walletProviderAttestationJwt, null)
+
+        @Suppress("UNCHECKED_CAST")
+        return Pair(claims.subject, JWK.parse(claims.getJSONObjectClaim("cnf").get("jwk") as Map<String, Any>))
     }
 
     suspend fun clearExpired() {
@@ -123,11 +195,29 @@ class ValidateWalletAttestation(
 }
 
 
-private fun getAttestationClaims(clientId: ClientId, signedJwt: SignedJWT): JWTClaimsSet? {
+context(Raise<WAVError>)
+private fun getAttestationClaims(clientId: ClientId, signedJwt: SignedJWT, issuer: String, cnfJwk: JWK): JWTClaimsSet? {
     val (algorithm, credentialKey) = algorithmAndCredentialKey(signedJwt.header, nonEmptySetOf(JWSAlgorithm.ES256))
+    validateAttestationJwk(credentialKey, cnfJwk)
     val keySelector = keySelector(credentialKey, algorithm)
-    val processor = attestationProcessor(clientId, keySelector)
+    val processor = attestationProcessor(clientId, issuer, keySelector)
     return processor.process(signedJwt, null)
+}
+
+context(Raise<WAVError>)
+private fun validateAttestationJwk(
+    credentialKey: CredentialKey,
+    cnfJwk: JWK
+) {
+    val attestationJwk = when (credentialKey) {
+        is DIDUrl -> credentialKey.jwk.toPublicJWK()
+        is Jwk -> credentialKey.value.toPublicJWK()
+        is X5c -> JWK.parse(credentialKey.certificate).toPublicJWK()
+    }
+
+    ensure(attestationJwk.computeThumbprint().equals(cnfJwk.computeThumbprint())) {
+        raise(Invalid)
+    }
 }
 
 private fun getAttestationPopClaims(
@@ -162,9 +252,9 @@ fun algorithmAndCredentialKey(
     val x5c = header.x509CertChain
 
     val key = when {
-        kid != null && jwk == null && x5c.isNullOrEmpty() -> CredentialKey.DIDUrl(kid).getOrThrow()
-        kid == null && jwk != null && x5c.isNullOrEmpty() -> CredentialKey.Jwk(jwk)
-        kid == null && jwk == null && !x5c.isNullOrEmpty() -> CredentialKey.X5c.parseDer(x5c).getOrThrow()
+        kid != null && jwk == null && x5c.isNullOrEmpty() -> DIDUrl(kid).getOrThrow()
+        kid == null && jwk != null && x5c.isNullOrEmpty() -> Jwk(jwk)
+        kid == null && jwk == null && !x5c.isNullOrEmpty() -> X5c.parseDer(x5c).getOrThrow()
 
         else -> error("a public key must be provided in one of 'kid', 'jwk', or 'x5c'")
     }.apply { ensureCompatibleWith(algorithm) }
@@ -187,10 +277,10 @@ private fun CredentialKey.ensureCompatibleWith(algorithm: JWSAlgorithm) {
     }
 
     when (this) {
-        is CredentialKey.DIDUrl -> jwk.ensureCompatibleWith(algorithm)
-        is CredentialKey.Jwk -> value.ensureCompatibleWith(algorithm)
+        is DIDUrl -> jwk.ensureCompatibleWith(algorithm)
+        is Jwk -> value.ensureCompatibleWith(algorithm)
 
-        is CredentialKey.X5c -> {
+        is X5c -> {
             val supportedAlgorithms =
                 when (certificate.publicKey) {
                     is RSAPublicKey -> RSASSASigner.SUPPORTED_ALGORITHMS
@@ -216,9 +306,9 @@ private fun keySelector(
         }
 
     return when (credentialKey) {
-        is CredentialKey.DIDUrl -> credentialKey.jwk.keySelector(algorithm)
-        is CredentialKey.Jwk -> credentialKey.value.keySelector(algorithm)
-        is CredentialKey.X5c -> SingleKeyJWSKeySelector(algorithm, credentialKey.certificate.publicKey)
+        is DIDUrl -> credentialKey.jwk.keySelector(algorithm)
+        is Jwk -> credentialKey.value.keySelector(algorithm)
+        is X5c -> SingleKeyJWSKeySelector(algorithm, credentialKey.certificate.publicKey)
     }
 }
 
@@ -227,6 +317,7 @@ private val maxSkew = 30.seconds
 private val attestationType = JOSEObjectType("wallet-attestation+jwt")
 private fun attestationProcessor(
     clientId: String,
+    issuer: String,
     keySelector: JWSKeySelector<SecurityContext>,
 ): JWTProcessor<SecurityContext> =
     DefaultJWTProcessor<SecurityContext>()
@@ -238,6 +329,7 @@ private fun attestationProcessor(
                     JWTClaimsSet.Builder()
                         .claim("aal", "https://trust-list.eu/aal/high") //TODO align this value
                         .subject(clientId)
+                        .issuer(issuer)
                         .build(),
                     setOf(
                         JWTClaimNames.ISSUER,
@@ -263,7 +355,7 @@ private fun attestationPopProcessor(
             jwsKeySelector = keySelector
             jwtClaimsSetVerifier =
                 DefaultJWTClaimsVerifier<SecurityContext?>(
-                    issuerId.externalForm, // aud
+                    issuerId, // aud
                     JWTClaimsSet.Builder()
                         .issuer(clientId)
                         .build(),

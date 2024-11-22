@@ -125,7 +125,7 @@ class EidApi(
 
                 else -> ServerResponse.status(HttpStatus.FOUND)
                     .location(
-                        UriComponentsBuilder.fromUriString("eudi-openid4ci://authorize")
+                        UriComponentsBuilder.fromUriString("eudi-openid4ci://authorize") //TODO get public uri
                             .queryParam("error", "Generic")
                             .queryParam("errorDescription", "Error during authentication")
                             .build().toUri()

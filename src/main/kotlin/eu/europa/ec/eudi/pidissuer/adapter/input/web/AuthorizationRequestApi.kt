@@ -19,8 +19,6 @@ import arrow.core.getOrElse
 import arrow.core.raise.either
 import com.nimbusds.oauth2.sdk.http.HTTPRequest
 import com.nimbusds.oauth2.sdk.http.HTTPRequest.Method
-import eu.europa.ec.eudi.pidissuer.adapter.input.web.EidApi.Companion.TCTOKEN_ENDPOINT
-import eu.europa.ec.eudi.pidissuer.domain.HttpsUrl
 import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationRequest
 import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationRequestError
 import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationRequestParams
@@ -36,7 +34,6 @@ import org.springframework.web.reactive.function.server.bodyValueAndAwait
 import org.springframework.web.reactive.function.server.buildAndAwait
 import org.springframework.web.reactive.function.server.coRouter
 import org.springframework.web.reactive.function.server.json
-import org.springframework.web.util.UriComponentsBuilder
 import java.net.URI
 
 suspend fun ServerRequest.toNimbusRequest(filter: ((String) -> String) = { it }): HTTPRequest {
@@ -48,7 +45,6 @@ suspend fun ServerRequest.toNimbusRequest(filter: ((String) -> String) = { it })
 
 class AuthorizationRequestApi(
     private val authorize: AuthorizationRequest,
-    private val publicIssuerURI: HttpsUrl
 ) {
     val router: RouterFunction<ServerResponse> = coRouter {
         GET(
@@ -71,46 +67,13 @@ class AuthorizationRequestApi(
             log.info("Successfully authenticated authentication request. requestUri: '{}'", requestUri)
 
             ServerResponse.status(HttpStatus.FOUND)
-                .location(
-                    createEidUrl(requestUri, requestParams.clientId)
-                ).buildAndAwait()
+                .location(requestUri).buildAndAwait()
         }.getOrElse { error ->
             ServerResponse.badRequest()
                 .json()
                 .bodyValueAndAwait(AuthorizationRequestResponseTO.error(error))
         }
     }
-
-    private fun createEidUrl(
-        requestUri: URI,
-        clientId: String
-    ) = UriComponentsBuilder.fromUriString("eid://127.0.0.1:24727/eID-Client")
-        .queryParam(
-            "tcTokenURL", createTcTokenUrl(requestUri, clientId)
-        )
-        .encode()
-        .build()
-        .toUri()
-        .also {
-            log.info("Eid-URL: {}", it)
-        }
-
-    private fun createTcTokenUrl(
-        requestUri: URI,
-        clientId: String
-    ) = UriComponentsBuilder.fromUriString(publicIssuerURI.externalForm)
-        .path(TCTOKEN_ENDPOINT)
-        .queryParam("request_uri", requestUri)
-        .queryParam(
-            "client_id",
-            clientId
-        )
-        .build()
-        .encode()
-        .toUriString()
-        .also {
-            log.info("TCTokenUrl: {}", it)
-        }
 
     companion object {
         const val AUTHORIZATION_ENDPOINT: String = "/wallet/authorization"

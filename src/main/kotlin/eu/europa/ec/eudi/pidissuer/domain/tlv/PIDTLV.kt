@@ -23,6 +23,8 @@ import org.bouncycastle.util.Arrays
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneOffset
 
 private fun ByteArrayOutputStream.write(tag: Tag, data: String) =
     this.write(tag, data.toByteArray(Charsets.UTF_8))
@@ -45,13 +47,13 @@ private fun buildTlv(tag: Tag, length: Short, data: ByteArray): ByteArray {
 }
 
 object PIDTLVPayload {
-    fun mapPid(pid: Pid, pidMetaData: PidMetaData): List<Pair<Tag, String>> = setOf(
+    fun mapPid(pid: Pid): List<Pair<Tag, String>> = setOf(
         Tag.PAYLOAD_GIVEN_NAME to pid.givenName?.value,
         Tag.PAYLOAD_FAMILY_NAME to pid.familyName?.value,
         Tag.PAYLOAD_DATE_OF_BIRTH to pid.birthDate?.toEUFormat(),
-        Tag.PAYLOAD_SOURCE_DOCUMENT_TYPE to pidMetaData.sourceType,
-        Tag.PAYLOAD_DATE_OF_EXPIRY to pidMetaData.expiryDate?.toEUFormat(),
-//        Tag.PAYLOAD_ACADEMIC_TITLE to pid.alsoKnownAs, //TODO no pid field
+        Tag.PAYLOAD_SOURCE_DOCUMENT_TYPE to pid.metaData.sourceType,
+        Tag.PAYLOAD_DATE_OF_EXPIRY to pid.metaData.expiryDate?.toEpochSecond(LocalTime.MIN, ZoneOffset.UTC).toString(),
+//        Tag.PAYLOAD_ACADEMIC_TITLE to pid.alsoKnownAs,
         Tag.PAYLOAD_RESIDENCE_STREET_ADDRESS to pid.residentStreet?.value,
         Tag.PAYLOAD_RESIDENCE_LOCALITY to pid.residentCity?.value,
         Tag.PAYLOAD_RESIDENCE_POSTAL_CODE to pid.residentPostalCode?.value,
@@ -65,9 +67,9 @@ object PIDTLVPayload {
         .toSet()
         .sortedBy { it.first.value }
 
-    operator fun invoke(pid: Pid, pidMetaData: PidMetaData): ByteArray {
+    operator fun invoke(pid: Pid): ByteArray {
         val output = ByteArrayOutputStream().apply {
-            mapPid(pid, pidMetaData).forEach {
+            mapPid(pid).forEach {
                 write(it.first, it.second)
             }
         }

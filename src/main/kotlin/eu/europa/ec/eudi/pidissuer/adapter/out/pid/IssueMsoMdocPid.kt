@@ -30,28 +30,18 @@
  */
 package eu.europa.ec.eudi.pidissuer.adapter.out.pid
 
-import arrow.core.nonEmptySetOf
-import arrow.core.raise.Raise
-import com.nimbusds.jose.JWSAlgorithm
-import com.nimbusds.jose.jwk.ECKey
-import com.nimbusds.jose.jwk.JWK
 import de.bund.bsi.eid.OperationsRequestorType
-import eu.europa.ec.eudi.pidissuer.adapter.out.jose.ValidateProof
-import eu.europa.ec.eudi.pidissuer.domain.*
-import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationContext
-import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError
-import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError.InvalidProof
-import eu.europa.ec.eudi.pidissuer.port.out.IssueSpecificCredential
-import eu.europa.ec.eudi.pidissuer.port.out.persistence.GenerateNotificationId
-import eu.europa.ec.eudi.pidissuer.port.out.persistence.StoreIssuedCredential
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
-import org.slf4j.LoggerFactory
+import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
+import eu.europa.ec.eudi.pidissuer.domain.AttributeDetails
+import eu.europa.ec.eudi.pidissuer.domain.CredentialConfigurationId
+import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerId
+import eu.europa.ec.eudi.pidissuer.domain.MSO_MDOC_FORMAT
+import eu.europa.ec.eudi.pidissuer.domain.MsoMdocCredentialConfiguration
+import eu.europa.ec.eudi.pidissuer.domain.MsoNameSpace
+import eu.europa.ec.eudi.pidissuer.domain.Scope
 import java.time.Clock
-import java.util.*
+import java.util.Locale
+import kotlin.time.Duration
 
 val PidMsoMdocScope: Scope = Scope("${PID_DOCTYPE}_${MSO_MDOC_FORMAT.value}")
 
@@ -81,6 +71,7 @@ val FamilyNameBirthAttribute = AttributeDetails(
     display = mapOf(Locale.ENGLISH to "Last name(s) or surname(s) of the PID User at the time of birth."),
     operationSetter = OperationsRequestorType::setBirthName
 )
+
 //val GivenNameBirthAttribute = AttributeDetails(
 //    name = "given_name_birth",
 //    mandatory = false,
@@ -131,8 +122,8 @@ val IssuingAuthorityAttribute = AttributeDetails(
     mandatory = false,
     display = mapOf(
         Locale.ENGLISH to "Name of the administrative authority that has issued this PID instance, " +
-            "or the ISO 3166 Alpha-2 country code of the respective Member State if there is " +
-            "no separate authority authorized to issue PIDs.",
+                "or the ISO 3166 Alpha-2 country code of the respective Member State if there is " +
+                "no separate authority authorized to issue PIDs.",
     ),
     operationSetter = OperationsRequestorType::setIssuingState
 )
@@ -165,7 +156,7 @@ val ResidenceAddressAttribute = AttributeDetails(
     mandatory = false,
     display = mapOf(
         Locale.ENGLISH to "The full address of the place where the PID User currently resides and/or " +
-            "can be contacted (street name, house number, city etc.).",
+                "can be contacted (street name, house number, city etc.).",
     ),
     operationSetter = OperationsRequestorType::setPlaceOfResidence
 )
@@ -201,6 +192,7 @@ val ResidenceStreetAttribute = AttributeDetails(
     display = mapOf(Locale.ENGLISH to "The name of the street where the PID User currently resides"),
     operationSetter = OperationsRequestorType::setPlaceOfResidence
 )
+
 //val ResidenceHouseNumberAttribute = AttributeDetails(
 //    name = "resident_house_number",
 //    mandatory = false,
@@ -229,6 +221,7 @@ val SourceDocumentType = AttributeDetails(
     display = mapOf(Locale.ENGLISH to "Source document type"),
     operationSetter = OperationsRequestorType::setDocumentType
 )
+
 //val IssuingJurisdictionAttribute = AttributeDetails(
 //    name = "issuing_jurisdiction",
 //    mandatory = false,
@@ -238,7 +231,7 @@ val SourceDocumentType = AttributeDetails(
 //            "as the value for issuing_country.",
 //    ),
 //)
-private val pidAttributes = PidMsoMdocNamespace to listOf(
+val pidMdocAttributes = PidMsoMdocNamespace to listOf(
     FamilyNameAttribute,
     GivenNameAttribute,
     BirthDateAttribute,
@@ -270,16 +263,20 @@ private val pidAttributes = PidMsoMdocNamespace to listOf(
     SourceDocumentType,
 )
 
-val PidMsoMdocV1: MsoMdocCredentialConfiguration =
+fun pidMsoMdocV1(
+    issuerSigningKey: IssuerSigningKey,
+    clock: Clock,
+    validityDuration: Duration,
+    issuerId: CredentialIssuerId
+): MsoMdocCredentialConfiguration<Pid> =
     MsoMdocCredentialConfiguration(
         id = CredentialConfigurationId(PidMsoMdocScope.value),
         docType = pidDocType(1),
         display = pidDisplay,
-        msoClaims = mapOf(pidAttributes),
-        cryptographicBindingMethodsSupported = emptySet(),
-        credentialSigningAlgorithmsSupported = emptySet(),
+        msoClaims = mapOf(pidMdocAttributes),
         scope = PidMsoMdocScope,
-        proofTypesSupported = nonEmptySetOf(ProofType.Jwt(nonEmptySetOf(JWSAlgorithm.ES256))),
+        encode = DefaultEncodePidInCbor(clock, issuerSigningKey, validityDuration),
+        issuerId = issuerId,
     )
 
 //
@@ -291,74 +288,3 @@ private fun pidDomesticNameSpace(v: Int?, countryCode: String): MsoNameSpace =
     else "$PID_DOCTYPE.$countryCode.$v"
 
 private fun pidNameSpace(v: Int?): MsoNameSpace = pidDocType(v)
-
-/**
- * Service for issuing PID MsoMdoc credential
- */
-class IssueMsoMdocPid(
-    credentialIssuerId: CredentialIssuerId,
-    private val getPidData: GetPidData,
-    private val encodePidInCbor: EncodePidInCbor,
-    private val notificationsEnabled: Boolean,
-    private val generateNotificationId: GenerateNotificationId,
-    private val clock: Clock,
-    private val storeIssuedCredential: StoreIssuedCredential,
-) : IssueSpecificCredential<JsonElement> {
-
-    private val log = LoggerFactory.getLogger(IssueMsoMdocPid::class.java)
-
-    private val validateProof = ValidateProof(credentialIssuerId)
-    override val supportedCredential: MsoMdocCredentialConfiguration
-        get() = PidMsoMdocV1
-    override val publicKey: JWK? = null
-
-    context(Raise<IssueCredentialError>)
-    override suspend fun invoke(
-        authorizationContext: AuthorizationContext,
-        request: CredentialRequest,
-        credentialIdentifier: CredentialIdentifier?,
-        expectedCNonce: CNonce,
-    ): CredentialResponse<JsonElement> = coroutineScope {
-        log.info("Handling issuance request ...")
-        val holderPubKey = async(Dispatchers.Default) { holderPubKey(request, expectedCNonce) }
-        val pidData = async { getPidData(authorizationContext) }
-        val (pid, pidMetaData) = pidData.await()
-        val cbor = encodePidInCbor(pid, pidMetaData, holderPubKey.await(), request.verifierKA).also {
-            log.info("Issued $it")
-        }
-
-        val notificationId =
-            if (notificationsEnabled) generateNotificationId()
-            else null
-        storeIssuedCredential(
-            IssuedCredential(
-                format = MSO_MDOC_FORMAT,
-                type = supportedCredential.docType,
-                holderPublicKey = holderPubKey.await().toPublicJWK(),
-                issuedAt = clock.instant(),
-                notificationId = notificationId,
-            ),
-        )
-
-        CredentialResponse.Issued(JsonPrimitive(cbor), notificationId)
-            .also {
-                log.info("Successfully issued PID")
-                log.debug("Issued PID data {}", it)
-            }
-    }
-
-    context(Raise<IssueCredentialError>)
-    @Suppress("DuplicatedCode")
-    private fun holderPubKey(request: CredentialRequest, expectedCNonce: CNonce): ECKey {
-        fun ecKeyOrFail(provider: () -> ECKey) = try {
-            provider.invoke()
-        } catch (t: Throwable) {
-            raise(InvalidProof("Only EC Key is supported"))
-        }
-        return when (val key = validateProof(request.unvalidatedProof, expectedCNonce, supportedCredential)) {
-            is CredentialKey.DIDUrl -> ecKeyOrFail { key.jwk.toECKey() }
-            is CredentialKey.Jwk -> ecKeyOrFail { key.value.toECKey() }
-            is CredentialKey.X5c -> ecKeyOrFail { ECKey.parse(key.certificate) }
-        }
-    }
-}

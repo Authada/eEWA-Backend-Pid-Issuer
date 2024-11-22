@@ -20,10 +20,10 @@ import java.security.PublicKey
 import java.security.cert.X509Certificate
 
 data class AuthenticatedChannelCOSECryptoProviderKeyInfo(
-  val keyID: String,
-  val algorithmID: AuthenticatedChannelAlgorithmID,
-  val publicKey: PublicKey,
-  val privateKey: PrivateKey? = null,
-  val x5Chain: List<X509Certificate> = listOf(),
-  val trustedRootCAs: List<X509Certificate> = listOf()
+    val keyID: String,
+    val algorithmID: AuthenticatedChannelAlgorithmID,
+    val publicKey: PublicKey,
+    val privateKey: PrivateKey? = null,
+    val x5Chain: List<X509Certificate> = listOf(),
+    val trustedRootCAs: List<X509Certificate> = listOf()
 )

@@ -136,12 +136,6 @@ data class CredentialResponseEncryptionTO(
 
 typealias ClaimsTO = Map<String, JsonElement>
 
-
-@Serializable
-data class VerifierKaTo(
-    @SerialName("jwk") @Required val jwk: JsonObject,
-)
-
 @Serializable
 data class CredentialRequestTO(
     val format: FormatTO? = null,
@@ -157,8 +151,8 @@ data class CredentialRequestTO(
     val claims: ClaimsTO? = null,
     @SerialName("alg")
     val signingAlgorithm: String? = null,
-    @SerialName("verifier-ka")
-    val verifierKa: VerifierKaTo? = null
+    @SerialName("verifier_pub")
+    val verifierPub: JsonObject? = null
 )
 
 /**
@@ -324,7 +318,7 @@ class IssueCredential(
         credentialRequestTO: CredentialRequestTO,
     ): IssueCredentialResponse = coroutineScope {
         either {
-            log.info("Handling issuance request for ${credentialRequestTO.format}, with verifierKA ${credentialRequestTO.verifierKa}")
+            log.info("Handling issuance request for ${credentialRequestTO.format}, with verifierKA ${credentialRequestTO.verifierPub}")
             val unresolvedRequest = credentialRequestTO.toDomain(
                 credentialIssuerMetadata.credentialResponseEncryption
             )
@@ -337,7 +331,7 @@ class IssueCredential(
                         resolve(unresolvedRequest) to unresolvedRequest.credentialIdentifier
                 }
             val issued = issue(authorizationContext, request, credentialIdentifier)
-            successResponse(authorizationContext, request, issued)
+            successResponse(request, issued)
         }.getOrElse { error ->
             errorResponse(authorizationContext, error)
         }
@@ -382,8 +376,8 @@ class IssueCredential(
         if (specificIssuer == null) {
             val types = when (credentialRequest) {
                 is MsoMdocCredentialRequest -> listOf(credentialRequest.docType)
-                is SdJwtVcCredentialRequest -> listOf(credentialRequest.type).map { it.value }
-                is SeTlvVcCredentialRequest -> listOf(credentialRequest.type).map { it.value }
+                is SdJwtVcCredentialRequest -> listOf(credentialRequest.type)
+                is SeTlvVcCredentialRequest -> listOf(credentialRequest.type)
             }
             raise(UnsupportedCredentialType(credentialRequest.format, types))
         }
@@ -391,7 +385,7 @@ class IssueCredential(
     }
 
     private suspend fun successResponse(
-        authorizationContext: AuthorizationContext,
+//        authorizationContext: AuthorizationContext,
         request: CredentialRequest,
         credential: CredentialResponse<JsonElement>,
     ): IssueCredentialResponse {
@@ -442,6 +436,8 @@ private sealed interface UnresolvedCredentialRequest {
     ) : UnresolvedCredentialRequest
 }
 
+private fun JsonObject.toJWK(): JWK = JWK.parse(Json.encodeToString(this))
+
 /**
  * Tries to convert a [CredentialRequestTO] to a [CredentialRequest].
  */
@@ -464,7 +460,7 @@ private fun CredentialRequestTO.toDomain(
                 val claims = claims?.decodeAs<Map<String, Map<String, JsonObject>>>()
                     ?.mapValues { (_, vs) -> vs.map { it.key } }
                     ?: emptyMap()
-                val verifierKa = this.verifierKa?.toDomain()
+                val verifierKa = this.verifierPub?.let { VerifierKA(it.toJWK())}
 
                 UnresolvedCredentialRequest.ByFormat(
                     MsoMdocCredentialRequest(
@@ -484,13 +480,13 @@ private fun CredentialRequestTO.toDomain(
                 }
                 val claims = claims?.decodeAs<Map<String, JsonObject>>()?.keys ?: emptySet()
 
-                val verifierKa = this.verifierKa?.toDomain()
+                val verifierKa = this.verifierPub?.let { VerifierKA(it.toJWK())}
 
                 UnresolvedCredentialRequest.ByFormat(
                     SdJwtVcCredentialRequest(
                         proof,
                         credentialResponseEncryption,
-                        SdJwtVcType(type),
+                        type,
                         claims,
                         verifierKa
                     ),
@@ -504,13 +500,13 @@ private fun CredentialRequestTO.toDomain(
                 }
                 val claims = claims?.decodeAs<Map<String, JsonObject>>()?.keys ?: emptySet()
 
-                val verifierKa = this.verifierKa?.toDomain()
+                val verifierKa = this.verifierPub?.let { VerifierKA(it.toJWK())}
 
                 UnresolvedCredentialRequest.ByFormat(
                     SeTlvVcCredentialRequest(
                         proof,
                         credentialResponseEncryption,
-                        SeTlvVcType(type),
+                        type,
                         claims,
                         verifierKa
                     ),
@@ -539,10 +535,6 @@ private fun CredentialRequestTO.toDomain(
         { credentialIdentifier -> credentialRequestByCredentialIdentifier(credentialIdentifier) },
         { _, _ -> raise(BothFormatAndCredentialIdentifierProvided) },
     )
-}
-
-fun VerifierKaTo.toDomain(): VerifierKA {
-    return VerifierKA(JWK.parse(Json.encodeToString(jwk)))
 }
 
 context(Raise<InvalidClaims>)

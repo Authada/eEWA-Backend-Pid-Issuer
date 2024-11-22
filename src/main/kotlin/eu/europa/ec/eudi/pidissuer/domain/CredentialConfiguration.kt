@@ -32,6 +32,8 @@ package eu.europa.ec.eudi.pidissuer.domain
 
 import arrow.core.NonEmptySet
 import com.nimbusds.jose.JWSAlgorithm
+import eu.europa.ec.eudi.pidissuer.adapter.out.Encode
+import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
 
 /**
  * The unique identifier of an offered Credential.
@@ -63,11 +65,16 @@ sealed interface ProofType {
  * Representing metadata about a separate credential type
  * that the Credential Issuer can issue
  */
-sealed interface CredentialConfiguration {
+sealed interface CredentialConfiguration<T> {
     val id: CredentialConfigurationId
+    val docType: String
+    val format: Format
     val scope: Scope?
     val display: List<CredentialDisplay>
     val cryptographicBindingMethodsSupported: Set<CryptographicBindingMethod>
     val credentialSigningAlgorithmsSupported: Set<JWSAlgorithm>
     val proofTypesSupported: Set<ProofType>
+    val encode: Encode<T>
+    val issuerSigningKey: IssuerSigningKey?
+    val issuerId: CredentialIssuerId
 }

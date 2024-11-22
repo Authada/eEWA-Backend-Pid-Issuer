@@ -44,7 +44,8 @@ sealed interface EidResultError {
 class HandleEidResult(
     private val client: EID,
     private val getAuthorizationSessionByRequestUriOnce: GetAuthorizationSessionByRequestUriOnce,
-    private val storeRequestUriReference: StoreRequestUriReference
+    private val storeRequestUriReference: StoreRequestUriReference,
+    private val createAuthorizationCodeUri: CreateAuthorizationCodeUri
 ) {
     context(Raise<EidResultError>)
     suspend operator fun invoke(requestUri: URI, clientId: String, clientResultMajor: String): URI {
@@ -62,16 +63,7 @@ class HandleEidResult(
         session.ageVerificationResult = getResultResponseType.fulfilsAgeVerification?.isFulfilsRequest
         val newRequestUri = URI("urn:ietf:params:oauth:request_uri:${UUID.randomUUID()}") //TODO extract
         storeRequestUriReference(newRequestUri, clientId, session.id)
-        return UriComponentsBuilder
-            .fromUriString(session.authRequest.redirectionURI.toString())
-            .queryParam("code", newRequestUri.toString())
-            .apply {
-                session.authRequest.state?.let {
-                    queryParam("state", it)
-                }
-            }
-            .build()
-            .toUri()
+        return createAuthorizationCodeUri(session.authRequest.redirectionURI, newRequestUri.toString(), session.authRequest.state)
     }
 
     context(Raise<EidResultError>)

@@ -19,23 +19,30 @@ import arrow.core.NonEmptySet
 import arrow.core.raise.Raise
 import arrow.core.raise.ensure
 import com.nimbusds.jose.JWSAlgorithm
+import eu.europa.ec.eudi.pidissuer.adapter.out.Encode
+import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
 
 const val SE_TLV_FORMAT_VALUE = "vc+se-tlv"
 val SE_TLV_FORMAT = Format(SE_TLV_FORMAT_VALUE)
 
-@JvmInline
-value class SeTlvVcType(val value: String)
+typealias SeTlvVcType = String
 
-data class SeTlvVcCredentialConfiguration(
+data class SeTlvVcCredentialConfiguration<T>(
     override val id: CredentialConfigurationId,
-    val type: SeTlvVcType,
+    override val docType: SeTlvVcType,
     override val scope: Scope? = null,
     override val cryptographicBindingMethodsSupported: NonEmptySet<CryptographicBindingMethod>,
     override val credentialSigningAlgorithmsSupported: NonEmptySet<JWSAlgorithm>,
     override val display: List<CredentialDisplay>,
     val claims: List<AttributeDetails>,
     override val proofTypesSupported: NonEmptySet<ProofType>,
-) : CredentialConfiguration
+    override val encode: Encode<T>,
+    override val issuerSigningKey: IssuerSigningKey,
+    override val issuerId: CredentialIssuerId
+) : CredentialConfiguration<T>{
+    override val format: Format
+        get() = SE_TLV_FORMAT
+}
 
 data class SeTlvVcCredentialRequest(
     override val unvalidatedProof: UnvalidatedProof,
@@ -48,8 +55,8 @@ data class SeTlvVcCredentialRequest(
 }
 
 context(Raise<String>)
-internal fun SeTlvVcCredentialRequest.validate(meta: SeTlvVcCredentialConfiguration) {
-    ensure(type == meta.type) { "doctype is $type but was expecting ${meta.type}" }
+internal fun SeTlvVcCredentialRequest.validate(meta: SeTlvVcCredentialConfiguration<*>) {
+    ensure(type == meta.docType) { "doctype is $type but was expecting ${meta.docType}" }
     if (meta.claims.isEmpty()) {
         ensure(claims.isEmpty()) { "Requested claims should be empty. " }
     } else {

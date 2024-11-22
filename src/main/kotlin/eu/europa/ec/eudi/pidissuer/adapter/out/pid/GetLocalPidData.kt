@@ -17,6 +17,7 @@ package eu.europa.ec.eudi.pidissuer.adapter.out.pid
 
 import arrow.core.raise.Raise
 import arrow.core.raise.ensureNotNull
+import eu.europa.ec.eudi.pidissuer.adapter.out.GetData
 import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationContext
 import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError
 import eu.europa.ec.eudi.pidissuer.port.input.Username
@@ -30,13 +31,13 @@ import java.time.Year
 class GetLocalPidData(
     private val getAuthorizationSessionByRequestUriRepeatable: GetAuthorizationSessionByRequestUriRepeatable,
     private val clock: Clock
-) : GetPidData {
-    override suspend fun invoke(username: Username): Pair<Pid, PidMetaData>? {
+) : GetData<Pid> {
+    override suspend fun invoke(username: Username): Pid? {
         throw UnsupportedOperationException()
     }
 
     context (Raise<IssueCredentialError.Unexpected>)
-    override suspend operator fun invoke(authorizationContext: AuthorizationContext): Pair<Pid, PidMetaData> {
+    override suspend operator fun invoke(authorizationContext: AuthorizationContext): Pid {
         val session = getAuthorizationSessionByRequestUriRepeatable(
             URI(authorizationContext.accessToken.value),
             authorizationContext.clientId!!
@@ -44,6 +45,20 @@ class GetLocalPidData(
         val eid = session.eidData
         val gergorianDateOfBirth = eid?.dateOfBirth?.dateValue?.toGregorianCalendar()?.toZonedDateTime()
         val pid = Pid(
+            metaData = PidMetaData(
+                issuanceDate = LocalDate.now(),
+                expiryDate = eid?.dateOfExpiry?.toGregorianCalendar()?.toZonedDateTime()?.toLocalDate(),
+                issuingCountry = eid?.issuingState?.let { IsoCountry(it) },
+                issuingAuthority = eid?.issuingState?.let { IssuingAuthority.MemberState(IsoCountry(it)) },
+                sourceType = eid?.documentType?.let {
+                    when (eid.documentType) {
+                        "ID" -> "id_card"
+                        "AS", "AR", "AF" -> "residence_permit"
+                        "UB" -> "eu_citizen_eid_card"
+                        else -> "test_id_card"
+                    }
+                }
+            ),
             familyName = eid?.familyNames?.let { FamilyName(it) },
             givenName = eid?.givenNames?.let { GivenName(it) },
             birthDate = gergorianDateOfBirth?.toLocalDate(),
@@ -75,20 +90,6 @@ class GetLocalPidData(
             nationality = eid?.nationality?.let { Nationality(it) },
             alsoKnownAs = eid?.artisticName
         )
-        val pidMeta = PidMetaData(
-            issuanceDate = LocalDate.now(),
-            expiryDate = eid?.dateOfExpiry?.toGregorianCalendar()?.toZonedDateTime()?.toLocalDate(),
-            issuingCountry = eid?.issuingState?.let { IsoCountry(it) },
-            issuingAuthority = eid?.issuingState?.let { IssuingAuthority.MemberState(IsoCountry(it)) },
-            sourceType = eid?.documentType?.let {
-                when (eid.documentType) {
-                    "ID" -> "id_card"
-                    "AS", "AR", "AF" -> "residence_permit"
-                    "UB" -> "eu_citizen_eid_card"
-                    else -> "test_id_card"
-                }
-            }
-        )
-        return ensureNotNull(pid to pidMeta) { IssueCredentialError.Unexpected("Cannot obtain data") }
+        return ensureNotNull(pid) { IssueCredentialError.Unexpected("Cannot obtain data") }
     }
 }

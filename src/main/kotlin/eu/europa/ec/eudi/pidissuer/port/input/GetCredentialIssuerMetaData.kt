@@ -100,14 +100,14 @@ data class DisplayTO(
 }
 
 private fun CredentialIssuerMetaData.toTransferObject(): CredentialIssuerMetaDataTO = CredentialIssuerMetaDataTO(
-    credentialIssuer = id.externalForm,
+    credentialIssuer = id,
     credentialEndpoint = credentialEndPoint.externalForm,
     batchCredentialEndpoint = batchCredentialEndpoint?.externalForm,
     deferredCredentialEndpoint = deferredCredentialEndpoint?.externalForm,
     notificationEndpoint = notificationEndpoint?.externalForm,
     credentialResponseEncryption = credentialResponseEncryption.toTransferObject().getOrNull(),
     credentialIdentifiersSupported = true,
-    signedMetadata = null,
+    signedMetadata = this.signedMetadata.serialize(),
     display = display.map { it.toTransferObject() }.takeIf { it.isNotEmpty() },
     credentialConfigurationsSupported = JsonObject(
         credentialConfigurationsSupported.associate { it.id.value to credentialMetaDataJson(it) },
@@ -146,15 +146,14 @@ private fun ImageUri.toTransferObject(): DisplayTO.LogoTO =
         alternativeText = alternativeText,
     )
 
-private fun CredentialConfiguration.format(): Format = when (this) {
-    is JwtVcJsonCredentialConfiguration -> JWT_VS_JSON_FORMAT
+private fun CredentialConfiguration<*>.format(): Format = when (this) {
     is MsoMdocCredentialConfiguration -> MSO_MDOC_FORMAT
     is SdJwtVcCredentialConfiguration -> SD_JWT_VC_FORMAT
     is SeTlvVcCredentialConfiguration -> SE_TLV_FORMAT
 }
 
 @OptIn(ExperimentalSerializationApi::class)
-private fun credentialMetaDataJson(d: CredentialConfiguration): JsonObject = buildJsonObject {
+private fun credentialMetaDataJson(d: CredentialConfiguration<*>): JsonObject = buildJsonObject {
     put("format", d.format().value)
     d.scope?.value?.let { put("scope", it) }
     d.cryptographicBindingMethodsSupported.takeIf { it.isNotEmpty() }
@@ -178,7 +177,6 @@ private fun credentialMetaDataJson(d: CredentialConfiguration): JsonObject = bui
             }
         }
     when (d) {
-        is JwtVcJsonCredentialConfiguration -> TODO()
         is MsoMdocCredentialConfiguration -> d.toTransferObject(false)(this)
         is SdJwtVcCredentialConfiguration -> d.toTransferObject(false)(this)
         is SeTlvVcCredentialConfiguration -> d.toTransferObject(false)(this)
@@ -209,7 +207,7 @@ private fun ProofType.toJsonObject(): JsonObject =
     }
 
 @OptIn(ExperimentalSerializationApi::class)
-internal fun MsoMdocCredentialConfiguration.toTransferObject(isOffer: Boolean): JsonObjectBuilder.() -> Unit = {
+internal fun MsoMdocCredentialConfiguration<*>.toTransferObject(isOffer: Boolean): JsonObjectBuilder.() -> Unit = {
     put("doctype", docType)
     if (!isOffer) {
         if (display.isNotEmpty()) {
@@ -226,11 +224,14 @@ internal fun MsoMdocCredentialConfiguration.toTransferObject(isOffer: Boolean): 
             }
         }
     }
+    putJsonArray("order") {
+        addAll(order)
+    }
 }
 
 @OptIn(ExperimentalSerializationApi::class)
-internal fun SdJwtVcCredentialConfiguration.toTransferObject(isOffer: Boolean): JsonObjectBuilder.() -> Unit = {
-    put("vct", type.value)
+internal fun SdJwtVcCredentialConfiguration<*>.toTransferObject(isOffer: Boolean): JsonObjectBuilder.() -> Unit = {
+    put("vct", docType)
     if (!isOffer) {
         if (display.isNotEmpty()) {
             putJsonArray("display") {
@@ -239,17 +240,20 @@ internal fun SdJwtVcCredentialConfiguration.toTransferObject(isOffer: Boolean): 
         }
     }
     putJsonObject("credential_definition") {
-        put("type", type.value)
+        put("type", docType)
         if (!isOffer) {
             putJsonObject("claims") {
                 claims.forEach { attribute -> attribute.toTransferObject(this) }
             }
         }
     }
+    putJsonArray("order") {
+        addAll(order)
+    }
 }
 @OptIn(ExperimentalSerializationApi::class)
-internal fun SeTlvVcCredentialConfiguration.toTransferObject(isOffer: Boolean): JsonObjectBuilder.() -> Unit = {
-    put("vct", type.value)
+internal fun SeTlvVcCredentialConfiguration<*>.toTransferObject(isOffer: Boolean): JsonObjectBuilder.() -> Unit = {
+    put("vct", docType)
     if (!isOffer) {
         if (display.isNotEmpty()) {
             putJsonArray("display") {
@@ -258,7 +262,7 @@ internal fun SeTlvVcCredentialConfiguration.toTransferObject(isOffer: Boolean): 
         }
     }
     putJsonObject("credential_definition") {
-        put("type", type.value)
+        put("type", docType)
         if (!isOffer) {
             putJsonObject("claims") {
                 claims.forEach { attribute -> attribute.toTransferObject(this) }

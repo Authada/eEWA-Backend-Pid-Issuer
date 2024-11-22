@@ -85,6 +85,7 @@ class CreateTCToken(
                 log.info("Setting eID Field '${it.name}' to required")
                 it.operationSetter?.invoke(this.useOperations, REQUIRED)
             }
+            this.useOperations.dateOfExpiry = REQUIRED
             if (this.useOperations.ageVerification in arrayOf(REQUIRED, ALLOWED)) {
                 this.ageVerificationRequest = AgeVerificationRequestType().apply {
                     this.age = 18

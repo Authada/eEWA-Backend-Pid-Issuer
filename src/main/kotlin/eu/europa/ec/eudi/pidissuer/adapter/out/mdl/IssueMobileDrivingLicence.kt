@@ -30,25 +30,21 @@
  */
 package eu.europa.ec.eudi.pidissuer.adapter.out.mdl
 
-import arrow.core.nonEmptySetOf
-import arrow.core.raise.Raise
-import arrow.core.raise.ensureNotNull
-import com.nimbusds.jose.JWSAlgorithm
-import com.nimbusds.jose.jwk.ECKey
-import com.nimbusds.jose.jwk.JWK
-import eu.europa.ec.eudi.pidissuer.adapter.out.jose.ValidateProof
-import eu.europa.ec.eudi.pidissuer.domain.*
-import eu.europa.ec.eudi.pidissuer.port.input.AuthorizationContext
-import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError
-import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError.InvalidProof
-import eu.europa.ec.eudi.pidissuer.port.out.IssueSpecificCredential
-import eu.europa.ec.eudi.pidissuer.port.out.persistence.GenerateNotificationId
-import eu.europa.ec.eudi.pidissuer.port.out.persistence.StoreIssuedCredential
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
-import org.slf4j.LoggerFactory
+import eu.europa.ec.eudi.pidissuer.adapter.out.IssuerSigningKey
+import eu.europa.ec.eudi.pidissuer.domain.AttributeDetails
+import eu.europa.ec.eudi.pidissuer.domain.CredentialConfigurationId
+import eu.europa.ec.eudi.pidissuer.domain.CredentialDisplay
+import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerId
+import eu.europa.ec.eudi.pidissuer.domain.DisplayName
+import eu.europa.ec.eudi.pidissuer.domain.ImageUri
+import eu.europa.ec.eudi.pidissuer.domain.MsoMdocCredentialConfiguration
+import eu.europa.ec.eudi.pidissuer.domain.MsoNameSpace
+import eu.europa.ec.eudi.pidissuer.domain.Scope
+import org.springframework.web.util.UriComponentsBuilder
+import java.net.URI
 import java.time.Clock
-import java.util.*
+import java.util.Locale
+import kotlin.time.Duration
 
 val MobileDrivingLicenceV1Scope: Scope = Scope(mdlDocType(1u))
 
@@ -280,94 +276,39 @@ val MobileDrivingLicenceV1Attributes: List<AttributeDetails> = listOf(
     SignatureUsualMarkAttribute,
 )
 
-val MobileDrivingLicenceDisplay: List<CredentialDisplay> = listOf(
-    CredentialDisplay(
-        name = DisplayName("Mobile Driving Licence", Locale.ENGLISH),
-    ),
-)
+val MobileDrivingLicenceDisplay = { publicUrl: String ->
+    listOf(
+        CredentialDisplay(
+            name = DisplayName("Mobile Driving Licence", Locale.ENGLISH),
+            logo = ImageUri(
+                UriComponentsBuilder.fromUriString(publicUrl.removeSuffix("/"))
+                    .path("/public/img/mdl/logo.png")
+                    .build().toUri(),
+                alternativeText = "Driver license icon"
+            ),
+            description = "eEWA Mobile Driving License Prototype",
+            backgroundColor = "#f4f4f4",
+            backgroundImage = ImageUri(
+                URI.create("https://authada.de/customerlogos/authada_dark.png"),
+                alternativeText = "AUTHADA dark logo"
+            ),
+            textColor = "#000000"
+        ),
+    )
+}
 
-val MobileDrivingLicenceV1: MsoMdocCredentialConfiguration =
+fun mobileDrivingLicenceV1(
+    issuerSigningKey: IssuerSigningKey,
+    clock: Clock,
+    validityDuration: Duration,
+    issuerId: CredentialIssuerId
+): MsoMdocCredentialConfiguration<MobileDrivingLicence> =
     MsoMdocCredentialConfiguration(
         id = CredentialConfigurationId(MobileDrivingLicenceV1Scope.value),
         docType = mdlDocType(1u),
-        display = MobileDrivingLicenceDisplay,
+        display = MobileDrivingLicenceDisplay(issuerId),
         msoClaims = mapOf(MobileDrivingLicenceV1Namespace to MobileDrivingLicenceV1Attributes),
-        cryptographicBindingMethodsSupported = emptySet(),
-        credentialSigningAlgorithmsSupported = emptySet(),
         scope = MobileDrivingLicenceV1Scope,
-        proofTypesSupported = nonEmptySetOf(ProofType.Jwt(nonEmptySetOf(JWSAlgorithm.ES256))),
+        encode = DefaultEncodeMobileDrivingLicenceInCbor(clock, issuerSigningKey, validityDuration),
+        issuerId = issuerId,
     )
-
-/**
- * Issuing service for Mobile Driving Licence.
- */
-class IssueMobileDrivingLicence(
-    credentialIssuerId: CredentialIssuerId,
-    private val getMobileDrivingLicenceData: GetMobileDrivingLicenceData,
-    private val encodeMobileDrivingLicenceInCbor: EncodeMobileDrivingLicenceInCbor,
-    private val notificationsEnabled: Boolean,
-    private val generateNotificationId: GenerateNotificationId,
-    private val clock: Clock,
-    private val storeIssuedCredential: StoreIssuedCredential,
-) : IssueSpecificCredential<JsonElement> {
-
-    override val supportedCredential: MsoMdocCredentialConfiguration
-        get() = MobileDrivingLicenceV1
-
-    override val publicKey: JWK?
-        get() = null
-
-    private val validateProof: ValidateProof = ValidateProof(credentialIssuerId)
-
-    context(Raise<IssueCredentialError>)
-    override suspend fun invoke(
-        authorizationContext: AuthorizationContext,
-        request: CredentialRequest,
-        credentialIdentifier: CredentialIdentifier?,
-        expectedCNonce: CNonce,
-    ): CredentialResponse<JsonElement> {
-        log.info("Issuing mDL")
-        val holderKey = holderPubKey(request, expectedCNonce)
-        val licence = ensureNotNull(getMobileDrivingLicenceData(authorizationContext)) {
-            IssueCredentialError.Unexpected("Unable to fetch mDL data")
-        }
-        val cbor = encodeMobileDrivingLicenceInCbor(licence, holderKey)
-
-        val notificationId =
-            if (notificationsEnabled) generateNotificationId()
-            else null
-        storeIssuedCredential(
-            IssuedCredential(
-                format = MSO_MDOC_FORMAT,
-                type = supportedCredential.docType,
-                holderPublicKey = holderKey.toPublicJWK(),
-                issuedAt = clock.instant(),
-                notificationId = notificationId,
-            ),
-        )
-
-        return CredentialResponse.Issued(JsonPrimitive(cbor), notificationId)
-            .also {
-                log.info("Successfully issued mDL")
-                log.debug("Issued mDL data {}", it)
-            }
-    }
-
-    context(Raise<IssueCredentialError>)
-    private fun holderPubKey(request: CredentialRequest, expectedCNonce: CNonce): ECKey {
-        fun ecKeyOrFail(provider: () -> ECKey) = try {
-            provider.invoke()
-        } catch (t: Throwable) {
-            raise(InvalidProof("Only EC Key is supported"))
-        }
-        return when (val key = validateProof(request.unvalidatedProof, expectedCNonce, supportedCredential)) {
-            is CredentialKey.DIDUrl -> ecKeyOrFail { key.jwk.toECKey() }
-            is CredentialKey.Jwk -> ecKeyOrFail { key.value.toECKey() }
-            is CredentialKey.X5c -> ecKeyOrFail { ECKey.parse(key.certificate) }
-        }
-    }
-
-    companion object {
-        private val log = LoggerFactory.getLogger(IssueMobileDrivingLicence::class.java)
-    }
-}

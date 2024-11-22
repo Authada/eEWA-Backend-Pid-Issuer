@@ -17,14 +17,11 @@ package eu.europa.ec.eudi.pidissuer.adapter.input.web
 
 import arrow.core.getOrElse
 import arrow.core.raise.either
-import com.nimbusds.oauth2.sdk.TokenRequest
 import com.nimbusds.oauth2.sdk.token.AccessTokenType
 import com.nimbusds.oauth2.sdk.token.DPoPAccessToken
-import com.nimbusds.oauth2.sdk.util.URLUtils
 import eu.europa.ec.eudi.pidissuer.domain.CNonce
+import eu.europa.ec.eudi.pidissuer.patch.TokenRequest
 import eu.europa.ec.eudi.pidissuer.port.input.AccessTokenRequest
-import eu.europa.ec.eudi.pidissuer.port.input.AccessTokenRequestError
-import eu.europa.ec.eudi.pidissuer.port.input.WalletClientAttestation
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -52,23 +49,12 @@ class TokenApi(
 
     private suspend fun handleAccessTokenRequest(request: ServerRequest): ServerResponse {
         log.info("Generating AccessToken Request response")
-        val unfilteredProperties = mutableMapOf<String, MutableList<String>>()
-        val nimbusHttpRequest = request.toNimbusRequest { body ->
-            val parsedParams = URLUtils.parseParameters(body)
-            unfilteredProperties.putAll(parsedParams)
-            URLUtils.serializeParameters(
-                parsedParams.minus(
-                    arrayOf(
-                        WalletClientAttestation.assertionFieldName,
-                        WalletClientAttestation.assertionTypeFieldName
-                    )
-                )
-            )
-        }
-        val tokenRequest = TokenRequest.parse(nimbusHttpRequest)
         return either {
-            val walletAttestation = WalletClientAttestation.fromFormData(unfilteredProperties) ?: raise(AccessTokenRequestError.InvalidRequest(""))
-            val (accessToken, cnonce) = requestToken(tokenRequest, nimbusHttpRequest.dPoP, walletAttestation)
+            log.info("Converting ot Nimbus request")
+            val nimbusHttpRequest = request.toNimbusRequest()
+            log.info("Parsing tokenrequest")
+            val tokenRequest = TokenRequest.parse(nimbusHttpRequest)
+            val (accessToken, cnonce) = requestToken(tokenRequest, nimbusHttpRequest.dPoP)
             log.info("Successfully created accessToken")
 
             ServerResponse.ok()
@@ -85,7 +71,6 @@ class TokenApi(
         const val TOKEN_ENDPOINT: String = "/wallet/token"
         private val log = LoggerFactory.getLogger(TokenApi::class.java)
     }
-
 
     @Serializable
     data class AccessTokenResponse(

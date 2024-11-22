@@ -31,7 +31,11 @@
 package eu.europa.ec.eudi.pidissuer.adapter.out.jose
 
 import arrow.core.raise.Raise
-import eu.europa.ec.eudi.pidissuer.domain.*
+import eu.europa.ec.eudi.pidissuer.domain.CNonce
+import eu.europa.ec.eudi.pidissuer.domain.CredentialConfiguration
+import eu.europa.ec.eudi.pidissuer.domain.CredentialIssuerId
+import eu.europa.ec.eudi.pidissuer.domain.CredentialKey
+import eu.europa.ec.eudi.pidissuer.domain.UnvalidatedProof
 import eu.europa.ec.eudi.pidissuer.port.input.IssueCredentialError.InvalidProof
 
 class ValidateProof(
@@ -42,7 +46,7 @@ class ValidateProof(
     operator fun invoke(
         unvalidatedProof: UnvalidatedProof,
         expectedCNonce: CNonce,
-        credentialConfiguration: CredentialConfiguration,
+        credentialConfiguration: CredentialConfiguration<*>,
     ): CredentialKey {
         fun jwt(jwt: UnvalidatedProof.Jwt): CredentialKey =
             validateJwtProof(credentialIssuerId, jwt, expectedCNonce, credentialConfiguration)

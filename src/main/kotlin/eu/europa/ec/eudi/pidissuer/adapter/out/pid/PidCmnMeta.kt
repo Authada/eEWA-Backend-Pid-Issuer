@@ -30,11 +30,15 @@
  */
 package eu.europa.ec.eudi.pidissuer.adapter.out.pid
 
-import eu.europa.ec.eudi.pidissuer.domain.*
+import eu.europa.ec.eudi.pidissuer.domain.CredentialDisplay
+import eu.europa.ec.eudi.pidissuer.domain.DisplayName
+import eu.europa.ec.eudi.pidissuer.domain.ImageUri
 import java.net.URI
 import java.util.Locale.ENGLISH
 
-internal const val PID_DOCTYPE = "eu.europa.ec.eudiw.pid"
+internal const val PID_DOCTYPE = "eu.europa.ec.eudi.pid"
+internal const val PID_DOCTYPE_SDJWTVC = "https://example.bmi.bund.de/credential/pid/1.0"
+internal const val PID_DOCTYPE_SDJWTVC_NEW = "https://metadata-8c062a.usercontent.opencode.de/pid.json"
 
 internal fun pidDocType(v: Int?): String =
     if (v == null) PID_DOCTYPE
@@ -42,10 +46,17 @@ internal fun pidDocType(v: Int?): String =
 
 val pidDisplay = listOf(
     CredentialDisplay(
-        name = DisplayName("PID", ENGLISH),
+        name = DisplayName("ID card", ENGLISH),
         logo = ImageUri(
-            uri = URI.create("https://examplestate.com/public/mdl.png"),
-            alternativeText = "A square figure of a PID",
+            URI.create("https://authada.de/customerlogos/authada_light.png"),
+            alternativeText = "AUTHADA logo"
         ),
+        description = "eEWA PID Prototype",
+        backgroundColor = "#aaaaaa",
+        backgroundImage = ImageUri(
+            URI.create("https://authada.de/customerlogos/authada_dark.png"),
+            alternativeText = "AUTHADA dark logo"
+        ),
+        textColor = "#6e23d2"
     ),
 )
